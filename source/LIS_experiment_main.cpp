@@ -64,6 +64,11 @@
 const std::string g_file_vertex_shader("../../../source/shader/volume.vert");
 const std::string g_file_fragment_shader("../../../source/shader/volume.frag");
 
+const std::string g_file_vertex_result_shader("../../../source/shader/LIS_transform_result.vert");
+const std::string g_file_fragment_result_shader("../../../source/shader/LIS_transform_result.frag");
+
+const std::string g_file_compute_result_shader("../../../source/shader/LIS_transform_result.cu");
+
 const std::string g_GUI_file_vertex_shader("../../../source/shader/pass_through_GUI.vert");
 const std::string g_GUI_file_fragment_shader("../../../source/shader/pass_through_GUI.frag");
 
@@ -96,6 +101,7 @@ unsigned g_channel_count;
 
 // Volume Rendering GLSL Program
 GLuint g_LIS_program(0);
+GLuint g_LIS_result_program(0);
 std::string g_error_message;
 bool g_reload_shader_error = false;
 
@@ -293,12 +299,17 @@ bool generate_marker_ssbo(glm::vec2 nbr_marker_squares, glm::vec2 distance_in_pe
 			marker_data[(i * nbr_marker_squares.x + j) * nbr_of_points_per_marker_square + 1] = glm::vec2(maxx, miny);
 			marker_data[(i * nbr_marker_squares.x + j) * nbr_of_points_per_marker_square + 2] = glm::vec2(maxx, maxy);
 			marker_data[(i * nbr_marker_squares.x + j) * nbr_of_points_per_marker_square + 3] = glm::vec2(minx, maxy);
-			
+#if 0
 			marker_data[(i * nbr_marker_squares.x + j) * nbr_of_points_per_marker_square + 4] = rotate2D(marker_data[(i * nbr_marker_squares.x + j) * nbr_of_points_per_marker_square + 0], angle_of_rotation);
 			marker_data[(i * nbr_marker_squares.x + j) * nbr_of_points_per_marker_square + 5] = rotate2D(marker_data[(i * nbr_marker_squares.x + j) * nbr_of_points_per_marker_square + 1], angle_of_rotation);
 			marker_data[(i * nbr_marker_squares.x + j) * nbr_of_points_per_marker_square + 6] = rotate2D(marker_data[(i * nbr_marker_squares.x + j) * nbr_of_points_per_marker_square + 2], angle_of_rotation);
 			marker_data[(i * nbr_marker_squares.x + j) * nbr_of_points_per_marker_square + 7] = rotate2D(marker_data[(i * nbr_marker_squares.x + j) * nbr_of_points_per_marker_square + 3], angle_of_rotation);				
-						
+#else
+			marker_data[(i * nbr_marker_squares.x + j) * nbr_of_points_per_marker_square + 4] = glm::vec2(minx + 0.01f, miny);
+			marker_data[(i * nbr_marker_squares.x + j) * nbr_of_points_per_marker_square + 5] = glm::vec2(maxx, miny - 0.01f);
+			marker_data[(i * nbr_marker_squares.x + j) * nbr_of_points_per_marker_square + 6] = glm::vec2(maxx, maxy);
+			marker_data[(i * nbr_marker_squares.x + j) * nbr_of_points_per_marker_square + 7] = glm::vec2(minx, maxy);
+#endif
 		}
 	}
 
@@ -726,12 +737,13 @@ int main(int argc, char* argv[])
 
     // init and upload volume texture
     bool check = read_bitmap(g_file_string);
-	check = generate_marker_ssbo(g_number_of_markers.x, 20, 0.1f);
+	check = generate_marker_ssbo(g_number_of_markers, glm::vec2(2.0f), glm::vec2(0.05f));
    
     // loading actual raytracing shader code (volume.vert, volume.frag)
     // edit volume.frag to define the result of our volume raycaster  
     try {
-        g_LIS_program = loadShaders(g_file_vertex_shader, g_file_fragment_shader);
+		g_LIS_program = loadShaders(g_file_vertex_shader, g_file_fragment_shader);
+		g_LIS_result_program = loadShaders(g_file_vertex_result_shader, g_file_fragment_result_shader);
     }
     catch (std::logic_error& e) {
         //std::cerr << e.what() << std::endl;
@@ -760,10 +772,12 @@ int main(int argc, char* argv[])
         /// reload shader if key R ist pressed
         if (g_reload_shader){
 
-            GLuint newProgram(0);
+			GLuint newProgram(0);
+			GLuint newResultProgram(0);
             try {
                 //std::cout << "Reload shaders" << std::endl;
-                newProgram = loadShaders(g_file_vertex_shader, g_file_fragment_shader);
+				newProgram = loadShaders(g_file_vertex_shader, g_file_fragment_shader);
+				newResultProgram = loadShaders(g_file_vertex_result_shader, g_file_fragment_result_shader);
                 g_error_message = "";
             }
             catch (std::logic_error& e) {
@@ -777,8 +791,9 @@ int main(int argc, char* argv[])
             if (0 != newProgram) {
                 glDeleteProgram(g_LIS_program);
 				g_LIS_program = newProgram;
+				glDeleteProgram(g_LIS_result_program);
+				g_LIS_result_program = newResultProgram;				
                 g_reload_shader_error = false;
-
             }
             else
             {
@@ -828,21 +843,7 @@ int main(int argc, char* argv[])
             turntable_matrix = manipulator.matrix(g_win);
         }
 
-        glm::detail::tmat4x4<float, glm::highp> model_view = view
-            //* glm::inverse(glm::translate(translate_pos))
-            //* glm::translate(translate_rot)
-            //* glm::translate(translate_pos)
-            * turntable_matrix
-            // rotate head upright
-            * glm::rotate(float(M_PI), glm::vec3(0.0f, 1.0f, 0.0f))
-            * glm::rotate(float(M_PI), glm::vec3(1.0f, 0.0f, 0.0f))
-            * glm::translate(translate_rot)
-            ;
 
-        glm::vec4 camera_translate = glm::column(glm::inverse(model_view), 3);
-        glm::vec3 camera_location = glm::vec3(camera_translate.x, camera_translate.y, camera_translate.z);
-
-        camera_location /= glm::vec3(camera_translate.w);
 
 		glBindBuffer(GL_SHADER_STORAGE_BUFFER, g_bitmap_SSBO);
 		//download
@@ -866,41 +867,65 @@ int main(int argc, char* argv[])
 
 		GLuint error = glGetError();
 		if(error)
-			std::cout << "Pre Render: " << error << std::endl;
+			std::cout << "Pre Render error code: " << error << std::endl;
 
-        glUseProgram(g_LIS_program);
+		GLuint current_program;
+
+		for(int path = 0; path != 2; ++path){
+			glm::detail::tmat4x4<float, glm::highp> model_view;
+			if (path == 0) {
+				model_view = view
+					* turntable_matrix
+					* glm::rotate(float(M_PI), glm::vec3(0.0f, 1.0f, 0.0f))
+					* glm::rotate(float(M_PI), glm::vec3(1.0f, 0.0f, 0.0f))
+					* glm::translate(translate_rot)
+					;
+				current_program = g_LIS_program;
+
+			}
+			else {
+				model_view = view
+					* glm::translate(glm::vec3(1.3f, 0.0f, 0.0f))
+					* turntable_matrix
+					* glm::rotate(float(M_PI), glm::vec3(0.0f, 1.0f, 0.0f))
+					* glm::rotate(float(M_PI), glm::vec3(1.0f, 0.0f, 0.0f))
+					* glm::translate(translate_rot)
+					;
+				current_program = g_LIS_result_program;
+			}
+			
+			glUseProgram(current_program);
 		
-		GLuint block_index = 0;
-		block_index = glGetProgramResourceIndex(g_LIS_program, GL_SHADER_STORAGE_BLOCK, "bit_array_buffer");
-		glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 0, g_bitmap_SSBO);
+			GLuint block_index = 0;
+			block_index = glGetProgramResourceIndex(current_program, GL_SHADER_STORAGE_BLOCK, "bit_array_buffer");
+			glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 0, g_bitmap_SSBO);
 
-		block_index = glGetProgramResourceIndex(g_LIS_program, GL_SHADER_STORAGE_BLOCK, "marker_vector_buffer");
-		glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 1, g_marker_vector_SSBO);
+			block_index = glGetProgramResourceIndex(current_program, GL_SHADER_STORAGE_BLOCK, "marker_vector_buffer");
+			glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 1, g_marker_vector_SSBO);
 
-		block_index = glGetProgramResourceIndex(g_LIS_program, GL_SHADER_STORAGE_BLOCK, "marker_aaba_buffer");
-		glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 2, g_marker_aaba_SSBO);
+			block_index = glGetProgramResourceIndex(current_program, GL_SHADER_STORAGE_BLOCK, "marker_aaba_buffer");
+			glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 2, g_marker_aaba_SSBO);
 
-		block_index = glGetProgramResourceIndex(g_LIS_program, GL_SHADER_STORAGE_BLOCK, "marker_bah_buffer");
-		glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 3, g_marker_aaba_SSBO);
+			block_index = glGetProgramResourceIndex(current_program, GL_SHADER_STORAGE_BLOCK, "marker_bah_buffer");
+			glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 3, g_marker_aaba_SSBO);
 
-		glUniform1ui(glGetUniformLocation(g_LIS_program, "image_byte_length"), (GLuint)g_image_byte_data_size);
-		glUniform2ui(glGetUniformLocation(g_LIS_program, "image_dimensions"), g_image_dimensions.x, g_image_dimensions.y);
-		glUniform2ui(glGetUniformLocation(g_LIS_program, "nbr_of_marker"), g_number_of_markers.x, g_number_of_markers.y);
+			glUniform1ui(glGetUniformLocation(current_program, "image_byte_length"), (GLuint)g_image_byte_data_size);
+			glUniform2ui(glGetUniformLocation(current_program, "image_dimensions"), g_image_dimensions.x, g_image_dimensions.y);
+			glUniform2ui(glGetUniformLocation(current_program, "nbr_of_marker"), g_number_of_markers.x, g_number_of_markers.y);
 		
-
-        glUniform3fv(glGetUniformLocation(g_LIS_program, "camera_location"), 1, glm::value_ptr(camera_location));
-
-        glUniformMatrix4fv(glGetUniformLocation(g_LIS_program, "Projection"), 1, GL_FALSE,
-            glm::value_ptr(projection));
-        glUniformMatrix4fv(glGetUniformLocation(g_LIS_program, "Modelview"), 1, GL_FALSE,
-            glm::value_ptr(model_view));
-        if (!g_pause)
-            g_plane.draw();
-        glUseProgram(0);
+			glUniformMatrix4fv(glGetUniformLocation(current_program, "Projection"), 1, GL_FALSE,
+				glm::value_ptr(projection));
+			glUniformMatrix4fv(glGetUniformLocation(current_program, "Modelview"), 1, GL_FALSE,
+				glm::value_ptr(model_view));
+			if (!g_pause) {
+				g_plane.draw();
+			}
+			glUseProgram(0);
+		}
 
 		error = glGetError();
 		if (error)
-			std::cout << "Post Render: " << glGetError() << std::endl;
+			std::cout << "Post Render error code: " << glGetError() << std::endl;
 
 
         //IMGUI ROUTINE begin    

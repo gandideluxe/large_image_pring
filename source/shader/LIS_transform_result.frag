@@ -49,6 +49,8 @@ uniform uint    image_byte_length;
 
 uniform uvec2   nbr_of_marker;
 
+const int nbr_of_points_per_marker_square = 8;
+
 vec4
 get_sample_data(vec2 in_sampling_pos) {
 
@@ -126,7 +128,7 @@ intersect(in vec2 point, in int marker_nbr, in int interleaved_lookup) {
 	//	return int(index);
 	
 	//intersect leaf
-	const int nbr_of_points_per_marker_square = 8;
+
 
 	int i, j = 0;
 	bool c = false;
@@ -155,23 +157,85 @@ intersect(in vec2 point, in int marker_nbr, in int interleaved_lookup) {
 
 }
 
+vec4
+affine_transform_color(vec2 frag_uv, int index) {
+	
+	vec2 src[4];
 
+	src[0] = marker_origin_distorted_interleaved[(index * nbr_of_points_per_marker_square) + 0];
+	src[1] = marker_origin_distorted_interleaved[(index * nbr_of_points_per_marker_square) + 1];
+	src[2] = marker_origin_distorted_interleaved[(index * nbr_of_points_per_marker_square) + 2];
+	src[3] = marker_origin_distorted_interleaved[(index * nbr_of_points_per_marker_square) + 3];
+
+	vec2 dst[4];
+
+	dst[0] = marker_origin_distorted_interleaved[(index * nbr_of_points_per_marker_square) + 0 + (nbr_of_points_per_marker_square / 2)];
+	dst[1] = marker_origin_distorted_interleaved[(index * nbr_of_points_per_marker_square) + 1 + (nbr_of_points_per_marker_square / 2)];
+	dst[2] = marker_origin_distorted_interleaved[(index * nbr_of_points_per_marker_square) + 2 + (nbr_of_points_per_marker_square / 2)];
+	dst[3] = marker_origin_distorted_interleaved[(index * nbr_of_points_per_marker_square) + 3 + (nbr_of_points_per_marker_square / 2)];
+
+	//calc affine transform
+	float x1 = dst[0].x;
+	float x2 = dst[1].x;
+	float x3 = dst[2].x;
+	float x4 = dst[3].x;
+
+	float y1 = dst[0].y;
+	float y2 = dst[1].y;
+	float y3 = dst[2].y;
+	float y4 = dst[3].y;
+
+	vec4 vxn = vec4(src[0].x, src[1].x, src[2].x, src[3].x);
+	vec4 vyn = vec4(src[0].y, src[1].y, src[2].y, src[3].y);
+	/*mat4 M = mat4(x1, y1, x1*y1, 1,
+				  x2, y2, x2*y2, 1,
+				  x3, y3, x3*y3, 1,
+				  x4, y4, x4*y4, 1	
+	);
+*/
+	mat4 M = mat4(x1, x2, x3, x4,
+				  y1, y2, y3, y4,
+				  x1*y1, x2*y2, x3*y3, x4*y4,
+				  1, 1, 1, 1
+				);
+
+
+
+	mat4 inverseM = inverse(M);
+
+	//a = M^ * x;
+	vec4 a = inverseM * vxn;
+	vec4 b = inverseM * vyn;
+	
+	vec2 src_cord = vec2(a[0] * frag_uv.x + a[1] * frag_uv.y + a[2] * frag_uv.x * frag_uv.y + a[3], 
+						 b[0] * frag_uv.x + b[1] * frag_uv.y + b[2] * frag_uv.x * frag_uv.y + b[3]);
+
+	//return vec4(src_cord, 0.0, 0.0);
+	return get_sample_data(src_cord);
+}
 
 void main()
 {
 
 	/// Init color of fragment
-	vec4 dst = get_sample_data(frag_uv);
-
+	//vec4 dst = get_sample_data(frag_uv);
+	vec4 dst = vec4(0.0);
 	//check square
-	int index = intersect(frag_uv, 0, 0);
+	int index = intersect(frag_uv, 0, 1);
 
-	if (index != -1)
-		dst += vec4(0.0, 1.0, 0.0, 0.0);
+	if (index != -1){
 
-	index = intersect(frag_uv, 0, 1);
-	if (index != -1)
-		dst += vec4(0.0, 0.0, 1.0, 0.0);
+		vec4 sample_data = affine_transform_color(frag_uv, index);
 
-	FragColor = dst;
+		//dst += /*vec4(0.0, 0.2, 0.0, 0.0) +*/ abs(sample_data - vec4(frag_uv, 0.0, 0.0));
+		dst = /*vec4(0.0, 0.1, 0.0, 0.0) + */sample_data;
+	}
+
+
+
+	//index = intersect(frag_uv, 0, 0);
+	//if (index != -1)
+	//	dst += vec4(0.0, 0.0, 0.1, 0.0);
+
+	FragColor = dst * 16.0;
 }
