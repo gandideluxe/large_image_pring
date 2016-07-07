@@ -8,6 +8,7 @@
 // -----------------------------------------------------------------------------
 
 #include "bounding_area_hierarchie.hpp"
+#include <iostream>
 #include <GL/glew.h>
 #include <GL/gl.h>
 #include <stack>
@@ -28,15 +29,21 @@ Bounding_area_hierarchie::Bounding_area_hierarchie(std::vector<glm::vec2>& marke
 	glm::vec2 ba_max_all = marker_rectangles[0];
 
 	for (auto r = 0u; r != nbr_of_marker_rects; ++r) {
-		glm::vec2 ba_min = marker_rectangles[r * nbr_of_points_per_marker_rectangle];
-		glm::vec2 ba_max = marker_rectangles[r * nbr_of_points_per_marker_rectangle];
+		glm::vec2 ba_min = glm::vec2(2.0);
+		glm::vec2 ba_max = glm::vec2(-1.0);;
 
 		for (auto v = 0u; v != nbr_of_points_per_marker_rectangle; ++v) {
 			ba_min.x = glm::min(ba_min.x, marker_rectangles[r * nbr_of_points_per_marker_rectangle + v].x);
 			ba_min.y = glm::min(ba_min.y, marker_rectangles[r * nbr_of_points_per_marker_rectangle + v].y);
 			ba_max.x = glm::max(ba_max.x, marker_rectangles[r * nbr_of_points_per_marker_rectangle + v].x);
 			ba_max.y = glm::max(ba_max.y, marker_rectangles[r * nbr_of_points_per_marker_rectangle + v].y);
+		
+			//std::cout << "r: " << r
+			//	<< " x: " << marker_rectangles[r * nbr_of_points_per_marker_rectangle + v].x 
+			//	<< " y: " << marker_rectangles[r * nbr_of_points_per_marker_rectangle + v].y << std::endl;
 		}
+
+		std::cout << std::endl;
 
 		aabr[r] = glm::vec4(ba_min, ba_max);
 		ba_min_all = glm::min(ba_min_all, ba_min);
@@ -62,7 +69,7 @@ Bounding_area_hierarchie::Bounding_area_hierarchie(std::vector<glm::vec2>& marke
 	}
 
 
-	generate_child_nodes(root, marker_rectangles, aabr);
+	//generate_child_nodes(root, marker_rectangles, aabr);
 
 }
 

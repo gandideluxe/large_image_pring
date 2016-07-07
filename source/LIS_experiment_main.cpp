@@ -107,6 +107,8 @@ GLuint g_marker_vector_SSBO = 0;
 GLuint g_marker_aaba_SSBO = 0;
 GLuint g_marker_bah_SSBO = 0;
 
+glm::uvec2 g_number_of_markers(2);
+
 static GLuint fontTex;
 static bool mousePressed[2] = { false, false };
 
@@ -251,49 +253,51 @@ bool read_bitmap(std::string& volume_string){
 }
 
 
-bool generate_marker_ssbo(unsigned nbr_marker_squares, float distance_in_percent, float distance_to_corner) {
+bool generate_marker_ssbo(glm::vec2 nbr_marker_squares, glm::vec2 distance_in_percent, glm::vec2 distance_to_corner) {
 
 	/*
 	generate some synthetic marker
 	assuming square printing job
 	*/
 
-	glm::vec2 init_left_uper_corner = glm::vec2(distance_to_corner, distance_to_corner);
-	glm::vec2 init_right_downer_corner = glm::vec2(1.0f - distance_to_corner,  1.0f - distance_to_corner);
+	glm::vec2 init_left_uper_corner = distance_to_corner;
+	glm::vec2 init_right_downer_corner = glm::vec2(1.0f - distance_to_corner.x,  1.0f - distance_to_corner.y);
 
-	float length_available = 1.0f - (distance_to_corner * 2.0f);
-	float length_used_for_distance = length_available * (distance_in_percent / 100.0f);
-	float length_left_for_squares = length_available - length_used_for_distance;
-	float length_square = length_left_for_squares / nbr_marker_squares;
-	float length_distance = length_used_for_distance / nbr_marker_squares;
+	glm::vec2 length_available = glm::vec2(1.0f) - (distance_to_corner * 2.0f);
+	glm::vec2 length_used_for_distance = length_available * (distance_in_percent / 100.0f);
+	glm::vec2 length_left_for_squares = length_available - length_used_for_distance;
+	glm::vec2 length_square = length_left_for_squares / nbr_marker_squares;
+	glm::vec2 length_distance = length_used_for_distance / nbr_marker_squares;
 
 	std::vector<glm::vec2> marker_data;
 
 	glm::vec2 area_min = glm::vec2(init_left_uper_corner.x, init_left_uper_corner.y);
 	glm::vec2 area_max = glm::vec2(1.0f - init_left_uper_corner.x, 1.0f - init_left_uper_corner.y);
 
-	float angle_of_rotation = 0.01f;
+	float angle_of_rotation = 0.05f;
 
 	const int nbr_of_points_per_marker_square = 8;
-	marker_data.resize(nbr_marker_squares * nbr_marker_squares * nbr_of_points_per_marker_square);
+	marker_data.resize(nbr_marker_squares.x * nbr_marker_squares.y * nbr_of_points_per_marker_square);
 
 
-	for (unsigned i = 0; i != nbr_marker_squares; ++i) {
-		for (unsigned j = 0; j != nbr_marker_squares; ++j) {
-			float minx = init_left_uper_corner.x + i * length_distance + i * length_square;
-			float maxx = init_left_uper_corner.x + i * length_distance + i * length_square + length_square;
-			float miny = init_left_uper_corner.y + i * length_distance + i * length_square;
-			float maxy = init_left_uper_corner.y + i * length_distance + i * length_square + length_square;
-		
-			marker_data[(i * nbr_marker_squares + j) * nbr_of_points_per_marker_square + 0] = glm::vec2(minx, miny);
-			marker_data[(i * nbr_marker_squares + j) * nbr_of_points_per_marker_square + 1] = glm::vec2(maxx, miny);
-			marker_data[(i * nbr_marker_squares + j) * nbr_of_points_per_marker_square + 2] = glm::vec2(maxx, maxy);
-			marker_data[(i * nbr_marker_squares + j) * nbr_of_points_per_marker_square + 3] = glm::vec2(minx, maxy);
+	for (unsigned i = 0; i != nbr_marker_squares.y; ++i) {
+		for (unsigned j = 0; j != nbr_marker_squares.x; ++j) {
+			float minx = init_left_uper_corner.x + j * length_distance.x + j * length_square.y;
+			float maxx = init_left_uper_corner.x + j * length_distance.x + j * length_square.y + length_square.y;
 			
-			marker_data[(i * nbr_marker_squares + j) * nbr_of_points_per_marker_square + 4] = rotate2D(marker_data[(i * nbr_marker_squares + j) * nbr_of_points_per_marker_square + 0], angle_of_rotation);
-			marker_data[(i * nbr_marker_squares + j) * nbr_of_points_per_marker_square + 5] = rotate2D(marker_data[(i * nbr_marker_squares + j) * nbr_of_points_per_marker_square + 1], angle_of_rotation);
-			marker_data[(i * nbr_marker_squares + j) * nbr_of_points_per_marker_square + 6] = rotate2D(marker_data[(i * nbr_marker_squares + j) * nbr_of_points_per_marker_square + 2], angle_of_rotation);
-			marker_data[(i * nbr_marker_squares + j) * nbr_of_points_per_marker_square + 7] = rotate2D(marker_data[(i * nbr_marker_squares + j) * nbr_of_points_per_marker_square + 3], angle_of_rotation);				
+			
+			float miny = init_left_uper_corner.y + i * length_distance.y + i * length_square.y;
+			float maxy = init_left_uper_corner.y + i * length_distance.y + i * length_square.y + length_square.y;
+		
+			marker_data[(i * nbr_marker_squares.x + j) * nbr_of_points_per_marker_square + 0] = glm::vec2(minx, miny);
+			marker_data[(i * nbr_marker_squares.x + j) * nbr_of_points_per_marker_square + 1] = glm::vec2(maxx, miny);
+			marker_data[(i * nbr_marker_squares.x + j) * nbr_of_points_per_marker_square + 2] = glm::vec2(maxx, maxy);
+			marker_data[(i * nbr_marker_squares.x + j) * nbr_of_points_per_marker_square + 3] = glm::vec2(minx, maxy);
+			
+			marker_data[(i * nbr_marker_squares.x + j) * nbr_of_points_per_marker_square + 4] = rotate2D(marker_data[(i * nbr_marker_squares.x + j) * nbr_of_points_per_marker_square + 0], angle_of_rotation);
+			marker_data[(i * nbr_marker_squares.x + j) * nbr_of_points_per_marker_square + 5] = rotate2D(marker_data[(i * nbr_marker_squares.x + j) * nbr_of_points_per_marker_square + 1], angle_of_rotation);
+			marker_data[(i * nbr_marker_squares.x + j) * nbr_of_points_per_marker_square + 6] = rotate2D(marker_data[(i * nbr_marker_squares.x + j) * nbr_of_points_per_marker_square + 2], angle_of_rotation);
+			marker_data[(i * nbr_marker_squares.x + j) * nbr_of_points_per_marker_square + 7] = rotate2D(marker_data[(i * nbr_marker_squares.x + j) * nbr_of_points_per_marker_square + 3], angle_of_rotation);				
 						
 		}
 	}
@@ -313,6 +317,11 @@ bool generate_marker_ssbo(unsigned nbr_marker_squares, float distance_in_percent
 	//};
 
 	auto aaba = bah.get_aaba();
+
+	//for (auto b : aaba) {
+
+	//	std::cout << "xmin: " << b.x << " ymin: " << b.y << " xmax: " << b.z << " ymax: " << b.w << std::endl;
+	//}
 
 	//std::vector<BinaryGLSLNode> glsl_data;
 
@@ -373,11 +382,11 @@ bool generate_marker_ssbo(unsigned nbr_marker_squares, float distance_in_percent
 
 	glGenBuffers(1, &g_marker_vector_SSBO);
 	glBindBuffer(GL_SHADER_STORAGE_BUFFER, g_marker_vector_SSBO);
-	glBufferData(GL_SHADER_STORAGE_BUFFER, (size_t)nbr_marker_squares * nbr_of_points_per_marker_square * sizeof(glm::vec2), &marker_data[0], GL_DYNAMIC_COPY);
+	glBufferData(GL_SHADER_STORAGE_BUFFER, (size_t)nbr_marker_squares.x * nbr_marker_squares.y * nbr_of_points_per_marker_square * sizeof(glm::vec2), &marker_data[0], GL_DYNAMIC_COPY);
 	glBindBuffer(GL_SHADER_STORAGE_BUFFER, 0);
 
 	glGenBuffers(1, &g_marker_aaba_SSBO);
-	glBindBuffer(GL_SHADER_STORAGE_BUFFER, g_marker_bah_SSBO);
+	glBindBuffer(GL_SHADER_STORAGE_BUFFER, g_marker_aaba_SSBO);
 	glBufferData(GL_SHADER_STORAGE_BUFFER, aaba.size() * sizeof(glm::vec4), &aaba[0], GL_DYNAMIC_COPY);
 	glBindBuffer(GL_SHADER_STORAGE_BUFFER, 0);
 
@@ -717,7 +726,7 @@ int main(int argc, char* argv[])
 
     // init and upload volume texture
     bool check = read_bitmap(g_file_string);
-	check = generate_marker_ssbo(1, 20, 0.1f);
+	check = generate_marker_ssbo(g_number_of_markers.x, 20, 0.1f);
    
     // loading actual raytracing shader code (volume.vert, volume.frag)
     // edit volume.frag to define the result of our volume raycaster  
@@ -876,6 +885,8 @@ int main(int argc, char* argv[])
 
 		glUniform1ui(glGetUniformLocation(g_LIS_program, "image_byte_length"), (GLuint)g_image_byte_data_size);
 		glUniform2ui(glGetUniformLocation(g_LIS_program, "image_dimensions"), g_image_dimensions.x, g_image_dimensions.y);
+		glUniform2ui(glGetUniformLocation(g_LIS_program, "nbr_of_marker"), g_number_of_markers.x, g_number_of_markers.y);
+		
 
         glUniform3fv(glGetUniformLocation(g_LIS_program, "camera_location"), 1, glm::value_ptr(camera_location));
 

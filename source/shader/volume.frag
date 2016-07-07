@@ -25,12 +25,15 @@ layout(std430, binding = 1) buffer marker_vector_buffer
 	vec2  marker_origin_distorted_interleaved[];
 };
 
-layout(std430, binding = 2) buffer marker_bah_buffer
+layout(std430, binding = 2) buffer marker_aaba_buffer
+{
+	vec4	  aaba_buffer[];
+};
+
+layout(std430, binding = 3) buffer marker_bah_buffer
 {
 	Node  bah_nodes[];
 };
-
-
 
 
 in vec3 entry_position;
@@ -44,6 +47,7 @@ uniform vec3    camera_location;
 uniform uvec2   image_dimensions;
 uniform uint    image_byte_length;
 
+uniform uvec2   nbr_of_marker;
 
 vec4
 get_sample_data(vec2 in_sampling_pos) {
@@ -92,13 +96,34 @@ intersectPointInTriangle(in vec2 p, in vec2 p0, in vec2 p1, in vec2 p2)
 	return s > 0 && t > 0 && (s + t) <= A;
 }
 
-bool
+int
 intersect(in vec2 point, in int marker_nbr, in int interleaved_lookup) {
 	
-	//traverse
+	bool aaba_found = false;
+	uint index = 0;
 
+	//check AABA first
+	for (int j = 0; j != nbr_of_marker.y; ++j) {
+		if (aaba_found)
+			break;
+		for (int i = 0; i != nbr_of_marker.x; ++i) {
+			index = i + j * nbr_of_marker.x;
+			vec4 aaba = aaba_buffer[index];
 
-	//
+			if (point.x > aaba.x 
+				&& point.x < aaba.z
+				&& point.y > aaba.y 
+				&& point.y < aaba.w) {
+				aaba_found = true;
+				break;
+			}
+		}
+	}
+
+	if (!aaba_found)
+		return -1;
+	//else
+	//	return int(index);
 	
 	//intersect leaf
 	const int nbr_of_points_per_marker_square = 8;
@@ -109,12 +134,11 @@ intersect(in vec2 point, in int marker_nbr, in int interleaved_lookup) {
 	
 	vec2 vert[nvert];
 
-	vert[0] = marker_origin_distorted_interleaved[(marker_nbr * nbr_of_points_per_marker_square) + 0 + (interleaved_lookup * nbr_of_points_per_marker_square / 2)];
-	vert[1] = marker_origin_distorted_interleaved[(marker_nbr * nbr_of_points_per_marker_square) + 1 + (interleaved_lookup * nbr_of_points_per_marker_square / 2)];
-	vert[2] = marker_origin_distorted_interleaved[(marker_nbr * nbr_of_points_per_marker_square) + 2 + (interleaved_lookup * nbr_of_points_per_marker_square / 2)];
-	vert[3] = marker_origin_distorted_interleaved[(marker_nbr * nbr_of_points_per_marker_square) + 3 + (interleaved_lookup * nbr_of_points_per_marker_square / 2)];
-
-
+	vert[0] = marker_origin_distorted_interleaved[(index * nbr_of_points_per_marker_square) + 0 + (interleaved_lookup * nbr_of_points_per_marker_square / 2)];
+	vert[1] = marker_origin_distorted_interleaved[(index * nbr_of_points_per_marker_square) + 1 + (interleaved_lookup * nbr_of_points_per_marker_square / 2)];
+	vert[2] = marker_origin_distorted_interleaved[(index * nbr_of_points_per_marker_square) + 2 + (interleaved_lookup * nbr_of_points_per_marker_square / 2)];
+	vert[3] = marker_origin_distorted_interleaved[(index * nbr_of_points_per_marker_square) + 3 + (interleaved_lookup * nbr_of_points_per_marker_square / 2)];
+	
 	//
 	for (i = 0, j = nvert - 1; i < nvert; j = i++) {
 		if (((vert[i].y>point.y) != (vert[j].y > point.y)) 
@@ -122,7 +146,11 @@ intersect(in vec2 point, in int marker_nbr, in int interleaved_lookup) {
 			)
 			c = !c;
 	}
-	return c;
+
+	if (!c)
+		return -1;
+
+	return int(index);
 
 }
 
@@ -135,13 +163,13 @@ void main()
 	vec4 dst = get_sample_data(frag_uv);
 
 	//check square
-	bool found = intersect(frag_uv, 0, 0);
+	int index = intersect(frag_uv, 0, 0);
 
-	if (found)
+	if (index != -1)
 		dst += vec4(0.0, 1.0, 0.0, 0.0);
 
-	found = intersect(frag_uv, 0, 1);
-	if (found)
+	//index = intersect(frag_uv, 0, 1);
+	if (index != -1)
 		dst += vec4(0.0, 0.0, 1.0, 0.0);
 
 	FragColor = dst;
