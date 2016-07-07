@@ -378,7 +378,7 @@ bool generate_marker_ssbo(unsigned nbr_marker_squares, float distance_in_percent
 
 	glGenBuffers(1, &g_marker_aaba_SSBO);
 	glBindBuffer(GL_SHADER_STORAGE_BUFFER, g_marker_bah_SSBO);
-	glBufferData(GL_SHADER_STORAGE_BUFFER, glsl_data.size() * sizeof(), &glsl_data[0], GL_DYNAMIC_COPY);
+	glBufferData(GL_SHADER_STORAGE_BUFFER, aaba.size() * sizeof(glm::vec4), &aaba[0], GL_DYNAMIC_COPY);
 	glBindBuffer(GL_SHADER_STORAGE_BUFFER, 0);
 
 	//glGenBuffers(1, &g_marker_bah_SSBO);
