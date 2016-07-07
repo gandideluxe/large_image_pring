@@ -58,6 +58,30 @@ GLuint createProgram(std::string const& v, std::string const& f)
   return id;
 }
 
+GLuint createProgram(std::string const& cs)
+{
+	GLuint id = glCreateProgram();
+
+	GLuint csHandle = loadShader(GL_COMPUTE_SHADER, cs);
+	glAttachShader(id, csHandle);
+	// schedule for deletion	
+	glDeleteShader(csHandle);
+
+	glLinkProgram(id);
+	GLint successful;
+
+	glGetProgramiv(id, GL_LINK_STATUS, &successful);
+	if (!successful) {
+		int length;
+		glGetProgramiv(id, GL_INFO_LOG_LENGTH, &length);
+		std::string info(length, ' ');
+
+		glGetProgramInfoLog(id, length, &length, &info[0]);
+		throw std::logic_error(info);
+	}
+	return id;
+}
+
 GLuint createTexture2D(unsigned const& width, unsigned const& height,
     const char* data)
 {

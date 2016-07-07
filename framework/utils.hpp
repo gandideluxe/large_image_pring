@@ -32,6 +32,7 @@ inline std::string readFile(std::string const& file)
 
 GLuint loadShader(GLenum type, std::string const& s);
 GLuint createProgram(std::string const& v, std::string const& f);
+GLuint createProgram(std::string const& cs);
 GLuint createTexture2D(unsigned const& width, unsigned const& height,
     const char* data);
 GLuint createTexture3D(unsigned const& width, unsigned const& height,

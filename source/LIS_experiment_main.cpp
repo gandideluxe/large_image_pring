@@ -79,6 +79,13 @@ GLuint loadShaders(std::string const& vs, std::string const& fs)
     return createProgram(v, f);
 }
 
+GLuint loadComputeShaders(std::string const& cs)
+{
+	std::string v = readFile(cs);
+	return createProgram(cs);
+}
+
+
 Turntable  g_turntable;
 
 ///SETUP VOLUME RAYCASTER HERE
@@ -102,6 +109,7 @@ unsigned g_channel_count;
 // Volume Rendering GLSL Program
 GLuint g_LIS_program(0);
 GLuint g_LIS_result_program(0);
+GLuint g_LIS_compute_program(0);
 std::string g_error_message;
 bool g_reload_shader_error = false;
 
@@ -744,9 +752,10 @@ int main(int argc, char* argv[])
     try {
 		g_LIS_program = loadShaders(g_file_vertex_shader, g_file_fragment_shader);
 		g_LIS_result_program = loadShaders(g_file_vertex_result_shader, g_file_fragment_result_shader);
+		g_LIS_compute_program = loadComputeShaders(g_file_compute_result_shader);
     }
     catch (std::logic_error& e) {
-        //std::cerr << e.what() << std::endl;
+        std::cerr << e.what() << std::endl;
         std::stringstream ss;
         ss << e.what() << std::endl;
         g_error_message = ss.str();
@@ -774,10 +783,12 @@ int main(int argc, char* argv[])
 
 			GLuint newProgram(0);
 			GLuint newResultProgram(0);
+			GLuint newComputeProgram(0);
             try {
                 //std::cout << "Reload shaders" << std::endl;
 				newProgram = loadShaders(g_file_vertex_shader, g_file_fragment_shader);
 				newResultProgram = loadShaders(g_file_vertex_result_shader, g_file_fragment_result_shader);
+				newComputeProgram = loadComputeShaders(g_file_compute_result_shader);
                 g_error_message = "";
             }
             catch (std::logic_error& e) {
@@ -787,12 +798,15 @@ int main(int argc, char* argv[])
                 g_error_message = ss.str();
                 g_reload_shader_error = true;
                 newProgram = 0;
+				newResultProgram = 0;
+				newComputeProgram = 0;
             }
-            if (0 != newProgram) {
+            if (0 != newProgram ) {
                 glDeleteProgram(g_LIS_program);
 				g_LIS_program = newProgram;
 				glDeleteProgram(g_LIS_result_program);
-				g_LIS_result_program = newResultProgram;				
+				g_LIS_result_program = newResultProgram;
+
                 g_reload_shader_error = false;
             }
             else
@@ -800,6 +814,16 @@ int main(int argc, char* argv[])
                 g_reload_shader_error = true;
 
             }
+			if (0 != newComputeProgram) {
+				glDeleteProgram(g_LIS_compute_program);
+				g_LIS_compute_program = newComputeProgram;
+				g_reload_shader_error = false;
+			}
+			else
+			{
+				g_reload_shader_error = true;
+
+			}
         }
 
         if (g_win.isKeyPressed(GLFW_KEY_R)) {
@@ -951,8 +975,12 @@ int main(int argc, char* argv[])
     glDetachShader(g_gui_program, frag_handle);
     glDeleteShader(vert_handle);
     glDeleteShader(frag_handle);
-    glDeleteProgram(g_gui_program);
+	glDeleteProgram(g_gui_program);
     //IMGUI shutdown end
+
+	glDeleteProgram(g_LIS_compute_program);
+	glDeleteProgram(g_LIS_result_program);
+	glDeleteProgram(g_LIS_program);
 
     ImGui::Shutdown();
 
