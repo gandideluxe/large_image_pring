@@ -160,6 +160,8 @@ glm::vec2 g_empty_in_percent = glm::vec2(20.0f);
 
 bool g_data_changed = true;
 
+float g_processing_status = 0.0;
+
 Plane g_plane;
 Plane g_plane_out;
 
@@ -707,6 +709,8 @@ void showGUI(){
 		ImGui::Text("Transformation");
 		g_data_changed ^= ImGui::SliderFloat("Angle rotation", &g_angle_of_rotation, -glm::pi<float>() , glm::pi<float>(), "%.3f", 1.0f);
 
+		ImGui::Text("Virtual Processing Status");
+		ImGui::SliderFloat(" percent done", &g_processing_status, 0.0f, 100.0f, "%.3f", 1.0f);
 	}
 
     if (ImGui::CollapsingHeader("Load LIS data", 0, true, false))
@@ -929,9 +933,7 @@ int main(int argc, char* argv[])
         if (!g_over_gui){
             turntable_matrix = manipulator.matrix(g_win);
         }
-
-
-
+				
 		//glBindBuffer(GL_SHADER_STORAGE_BUFFER, g_bitmap_SSBO);
 		////download
 		//GLvoid* p = glMapBuffer(GL_SHADER_STORAGE_BUFFER, GL_READ_ONLY);
@@ -1039,12 +1041,14 @@ int main(int argc, char* argv[])
 		glUniform2ui(glGetUniformLocation(current_program, "image_out_dimensions"), g_image_out_dimensions.x, g_image_out_dimensions.y);
 		glUniform2ui(glGetUniformLocation(current_program, "nbr_of_marker"), g_number_of_markers.x, g_number_of_markers.y);
 
+		glUniform1ui(glGetUniformLocation(current_program, "image_byte_length"), (GLuint)g_image_byte_data_size);
+		
 		glDispatchCompute(g_image_out_dimensions.x / 16, g_image_out_dimensions.y / 16, 1);
 
+		glMemoryBarrier(GL_TEXTURE_FETCH_BARRIER_BIT);
+
 		glUseProgram(0);
-
-		glFinish();
-
+		
 		glm::detail::tmat4x4<float, glm::highp> model_view;
 		model_view = view
 			* glm::translate(glm::vec3(1.125f, 0.1f, 0.0f))
@@ -1075,9 +1079,11 @@ int main(int argc, char* argv[])
 
 		glUniform1ui(glGetUniformLocation(current_program, "image_byte_length"), (GLuint)g_image_byte_data_size);
 		glUniform1ui(glGetUniformLocation(current_program, "image_out_byte_length"), (GLuint)g_image_out_byte_data_size);
+		glUniform1f(glGetUniformLocation(current_program, "process_status"), g_processing_status / 100.0);
 		glUniform2ui(glGetUniformLocation(current_program, "image_dimensions"), g_image_dimensions.x, g_image_dimensions.y);
 		glUniform2ui(glGetUniformLocation(current_program, "image_out_dimensions"), g_image_out_dimensions.x, g_image_out_dimensions.y);
 		glUniform2ui(glGetUniformLocation(current_program, "nbr_of_marker"), g_number_of_markers.x, g_number_of_markers.y);
+
 
 		glUniformMatrix4fv(glGetUniformLocation(current_program, "Projection"), 1, GL_FALSE,
 			glm::value_ptr(projection));

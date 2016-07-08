@@ -65,41 +65,17 @@ get_sample_data(vec2 in_sampling_pos) {
 	uint bit_offset = byte_pos % 32;
 
 	//GLSL is working with 32bit/64bit values only
-	//data storage is 8bit	
+	//data storage is 32bit	
 	//
 	//get 0/1 from bit 
 	uint value = 0;
 	value = uint(data[byte_offset] >> bit_offset) & 0x000001;
-	//value = (uint(data[byte_offset]) & 0xFF);
-	//value = (uint(data[byte_offset]));
-	//value = data[0];
-	//value = pixel_pos.x;
+
 
 	return vec4(float(value), 0.0, 0.0, 1.0);
-	//return vec4(6.0 * float(byte_offset) / (image_dimensions.x * image_dimensions.y), float(bit_offset) / 8, 0.0, 1.0);
-
-	return vec4(float(pixel_pos.x) / image_dimensions.x, float(pixel_pos.y) / image_dimensions.y, 0.0, 1.0);
 
 }
 
-bool
-intersectPointInTriangle(in vec2 p, in vec2 p0, in vec2 p1, in vec2 p2)
-{
-	float s = p0.y * p2.x - p0.x * p2.y + (p2.y - p0.y) * p.x + (p0.x - p2.x) * p.y;
-	float t = p0.x * p1.y - p0.y * p1.x + (p0.y - p1.y) * p.x + (p1.x - p0.x) * p.y;
-
-	if ((s < 0) != (t < 0))
-		return false;
-
-	float A = -p1.y * p2.x + p0.y * (p2.x - p1.x) + p0.x * (p1.y - p2.y) + p1.x * p2.y;
-	if (A < 0.0)
-	{
-		s = -s;
-		t = -t;
-		A = -A;
-	}
-	return s > 0 && t > 0 && (s + t) <= A;
-}
 
 int
 intersect(in vec2 point, in int marker_nbr, in int interleaved_lookup) {
@@ -107,28 +83,6 @@ intersect(in vec2 point, in int marker_nbr, in int interleaved_lookup) {
 	bool aaba_found = false;
 	uint index = 0;
 
-	//check AABA first
-	//for (int j = 0; j != nbr_of_marker.y; ++j) {
-	//	if (aaba_found)
-	//		break;
-	//	for (int i = 0; i != nbr_of_marker.x; ++i) {
-	//		index = i + j * nbr_of_marker.x;
-	//		vec4 aaba = aaba_buffer[index];
-
-	//		if (point.x > aaba.x 
-	//			&& point.x < aaba.z
-	//			&& point.y > aaba.y 
-	//			&& point.y < aaba.w) {
-	//			aaba_found = true;
-	//			break;
-	//		}
-	//	}
-	//}
-
-	//if (!aaba_found)
-	//	return -1;
-	//else
-	//	return int(index);
 	
 	bool quad_hit = false;
 
