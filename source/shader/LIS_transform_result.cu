@@ -9,17 +9,23 @@ layout(std430, binding = 0) buffer bit_array_buffer
 	uint data[];
 };
 
-layout(std430, binding = 1) buffer marker_vector_buffer
+layout(std430, binding = 1) buffer bit_array_buffer
+{
+	uint data_out[];
+};
+
+
+layout(std430, binding = 2) buffer marker_vector_buffer
 {
 	vec2  marker_origin_distorted_interleaved[]; //4 vec2 marker orig 4 vec2 marker distort
 };
 
-layout(std430, binding = 2) buffer marker_aaba_buffer
+layout(std430, binding = 3) buffer marker_aaba_buffer
 {
 	vec4	  aaba_buffer[];
 };
 
-layout(std430, binding = 3) buffer marker_transform_buffer
+layout(std430, binding = 4) buffer marker_transform_buffer
 {
 	vec4  marker_affine_transform_coeffs[]; //1 vec4 = a[4] 1 vec4 = b[4]
 };

@@ -20,17 +20,17 @@ layout(std430, binding = 0) buffer bit_array_buffer
 	uint data[];
 };
 
-layout(std430, binding = 1) buffer marker_vector_buffer
+layout(std430, binding = 2) buffer marker_vector_buffer
 {
 	vec2  marker_origin_distorted_interleaved[];
 };
 
-layout(std430, binding = 2) buffer marker_aaba_buffer
+layout(std430, binding = 3) buffer marker_aaba_buffer
 {
 	vec4	  aaba_buffer[];
 };
 
-layout(std430, binding = 3) buffer marker_bah_buffer
+layout(std430, binding = 4) buffer marker_bah_buffer
 {
 	Node  bah_nodes[];
 };
@@ -48,6 +48,8 @@ uniform uvec2   image_dimensions;
 uniform uint    image_byte_length;
 
 uniform uvec2   nbr_of_marker;
+
+const int nbr_of_points_per_marker_square = 8;
 
 vec4
 get_sample_data(vec2 in_sampling_pos) {
@@ -98,63 +100,46 @@ intersectPointInTriangle(in vec2 p, in vec2 p0, in vec2 p1, in vec2 p2)
 
 int
 intersect(in vec2 point, in int marker_nbr, in int interleaved_lookup) {
-	
+
 	bool aaba_found = false;
 	uint index = 0;
 
-	//check AABA first
-	for (int j = 0; j != nbr_of_marker.y; ++j) {
-		if (aaba_found)
-			break;
-		for (int i = 0; i != nbr_of_marker.x; ++i) {
-			index = i + j * nbr_of_marker.x;
-			vec4 aaba = aaba_buffer[index];
+	bool quad_hit = false;
 
-			if (point.x > aaba.x 
-				&& point.x < aaba.z
-				&& point.y > aaba.y 
-				&& point.y < aaba.w) {
-				aaba_found = true;
-				break;
-			}
+	for (index = 0; index != (nbr_of_marker.x * nbr_of_marker.y); ++index) {
+
+		int i, j = 0;
+		bool c = false;
+		const int nvert = 4;
+
+		vec2 vert[nvert];
+
+		vert[0] = marker_origin_distorted_interleaved[(index * nbr_of_points_per_marker_square) + 0 + (interleaved_lookup * nbr_of_points_per_marker_square / 2)];
+		vert[1] = marker_origin_distorted_interleaved[(index * nbr_of_points_per_marker_square) + 1 + (interleaved_lookup * nbr_of_points_per_marker_square / 2)];
+		vert[2] = marker_origin_distorted_interleaved[(index * nbr_of_points_per_marker_square) + 2 + (interleaved_lookup * nbr_of_points_per_marker_square / 2)];
+		vert[3] = marker_origin_distorted_interleaved[(index * nbr_of_points_per_marker_square) + 3 + (interleaved_lookup * nbr_of_points_per_marker_square / 2)];
+
+		//
+		for (i = 0, j = nvert - 1; i < nvert; j = i++) {
+			if (((vert[i].y > point.y) != (vert[j].y > point.y))
+				&& (point.x < (vert[j].x - vert[i].x) * (point.y - vert[i].y) / (vert[j].y - vert[i].y) + vert[i].x)
+				)
+				c = !c;
+		}
+
+		if (c) {
+			quad_hit = true;
+			break;
 		}
 	}
 
-	if (!aaba_found)
+	if (quad_hit)
+		return int(index);
+	else
 		return -1;
-	//else
-	//	return int(index);
-	
-	//intersect leaf
-	const int nbr_of_points_per_marker_square = 8;
-
-	int i, j = 0;
-	bool c = false;
-	const int nvert = 4;
-	
-	vec2 vert[nvert];
-
-	vert[0] = marker_origin_distorted_interleaved[(index * nbr_of_points_per_marker_square) + 0 + (interleaved_lookup * nbr_of_points_per_marker_square / 2)];
-	vert[1] = marker_origin_distorted_interleaved[(index * nbr_of_points_per_marker_square) + 1 + (interleaved_lookup * nbr_of_points_per_marker_square / 2)];
-	vert[2] = marker_origin_distorted_interleaved[(index * nbr_of_points_per_marker_square) + 2 + (interleaved_lookup * nbr_of_points_per_marker_square / 2)];
-	vert[3] = marker_origin_distorted_interleaved[(index * nbr_of_points_per_marker_square) + 3 + (interleaved_lookup * nbr_of_points_per_marker_square / 2)];
-	
-	//
-	for (i = 0, j = nvert - 1; i < nvert; j = i++) {
-		if (((vert[i].y>point.y) != (vert[j].y > point.y)) 
-			&& (point.x < (vert[j].x - vert[i].x) * (point.y - vert[i].y) / (vert[j].y - vert[i].y) + vert[i].x)
-			)
-			c = !c;
-	}
-
-	if (!c)
-		return -1;
-
-	return int(index);
 
 
 }
-
 
 
 void main()

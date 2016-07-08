@@ -100,11 +100,12 @@ glm::ivec2  g_window_res = glm::ivec2(1600, 800);
 Window g_win(g_window_res);
 
 LIS_bitmap_loader_raw g_image_loader;
-image_data_type g_image_data[2];
-glm::uvec2 g_image_dimensions;
-size_t g_image_byte_data_size;
-unsigned g_channel_size;
-unsigned g_channel_count;
+image_data_type g_image_data;
+image_data_type g_image_out_data;
+glm::uvec2 g_image_dimensions = glm::uvec2(4000u, 4000u);
+glm::uvec2 g_image_out_dimensions = glm::uvec2(g_image_dimensions.x, 144u);
+size_t g_image_byte_data_size = 0;
+size_t g_image_out_byte_data_size = 0;
 
 std::vector<glm::vec2> g_marker_data;
 std::vector<glm::vec4> g_aaba_data;
@@ -124,6 +125,7 @@ static bool g_show_gui = true;
 #define MAX_SUPPORTET_MARKER 32 * 32
 
 GLuint g_bitmap_SSBO = 0;
+GLuint g_bitmap_out_SSBO = 0;
 GLuint g_marker_vector_SSBO = 0;
 GLuint g_marker_aaba_SSBO = 0;
 GLuint g_marker_transform_SSBO = 0;
@@ -155,7 +157,7 @@ glm::vec2 g_empty_in_percent = glm::vec2(20.0f);
 bool g_data_changed = true;
 
 Plane g_plane;
-
+Plane g_plane_out;
 
 struct Manipulator
 {
@@ -246,30 +248,36 @@ bool read_bitmap(std::string& volume_string){
 #else
 	int mode = 2;
 
-	g_image_dimensions = glm::uvec2(4000u, 4000u);
-	g_image_data[0] = g_image_loader.generate_artificial_test_byte_map(mode, g_image_dimensions);
-	g_image_data[1] = g_image_loader.generate_artificial_test_byte_map(0, g_image_dimensions);
+	//g_image_dimensions = glm::uvec2(4000u, 4000u);
+	g_image_data = g_image_loader.generate_artificial_test_byte_map(mode, g_image_dimensions);
 	g_image_byte_data_size = g_image_loader.get_byte_size(g_image_dimensions);
+
+	g_image_out_data = g_image_loader.generate_artificial_test_byte_map(0, g_image_out_dimensions);
+	g_image_out_byte_data_size = g_image_loader.get_byte_size(g_image_out_dimensions);
 
 	//write to disk
 	std::string filename = std::string("D:/LISData/generated/test_file_bit_mode").append(std::to_string(mode)).append("_w").append(std::to_string(g_image_dimensions.x)).append("_h").append(std::to_string(g_image_dimensions.y));
 	std::ofstream myFile(filename, std::ios::out | std::ios::binary);
-	myFile.write((char*)&g_image_data[0][0], g_image_byte_data_size);
+	myFile.write((char*)&g_image_data[0], g_image_byte_data_size);
 	myFile.close();
 
 	std::cout << filename << " written" << std::endl;
 #endif
 
-    g_channel_size = g_image_loader.get_bit_per_channel(g_file_string) / 8;
-    g_channel_count = g_image_loader.get_channel_count(g_file_string);
-
     // setting up proxy geometry
 	float max_image_dim = glm::max((float)g_image_dimensions.x, (float)g_image_dimensions.y);
-    g_plane = Plane(glm::vec2(-0.0f), glm::vec2((float)g_image_dimensions.x/max_image_dim, (float)g_image_dimensions.y / max_image_dim));
+	float max_image_out_dim = glm::max((float)g_image_out_dimensions.x, (float)g_image_out_dimensions.y);
+	g_plane = Plane(glm::vec2(0.0f), glm::vec2((float)g_image_dimensions.x / max_image_dim, (float)g_image_dimensions.y / max_image_dim));
+	g_plane_out = Plane(glm::vec2(0.0f), glm::vec2((float)g_image_out_dimensions.x/ max_image_out_dim, (float)g_image_out_dimensions.y / max_image_out_dim));
 
 	glGenBuffers(1, &g_bitmap_SSBO);
 	glBindBuffer(GL_SHADER_STORAGE_BUFFER, g_bitmap_SSBO);
-	glBufferData(GL_SHADER_STORAGE_BUFFER, g_image_byte_data_size, &g_image_data[0][0], GL_DYNAMIC_COPY);
+	glBufferData(GL_SHADER_STORAGE_BUFFER, g_image_byte_data_size, &g_image_data[0], GL_DYNAMIC_COPY);
+	glBindBuffer(GL_SHADER_STORAGE_BUFFER, 0);
+
+	glGenBuffers(1, &g_bitmap_out_SSBO);
+	glBindBuffer(GL_SHADER_STORAGE_BUFFER, g_bitmap_out_SSBO);
+	glBufferData(GL_SHADER_STORAGE_BUFFER, g_image_out_byte_data_size, &g_image_out_data[0], GL_DYNAMIC_COPY);
 	glBindBuffer(GL_SHADER_STORAGE_BUFFER, 0);
 
     return (bool)g_bitmap_SSBO;
@@ -406,10 +414,6 @@ update_marker_ssbo(glm::vec2 nbr_marker_squares, glm::vec2 distance_in_percent, 
 			g_marker_data[(y * nbr_marker_squares.x + x) * nbr_of_points_per_marker_square + 2] = glm::vec2(maxx, maxy);
 			g_marker_data[(y * nbr_marker_squares.x + x) * nbr_of_points_per_marker_square + 3] = glm::vec2(minx, maxy);
 
-			//std::cout << "P1x:" << minx << "\t P1y:" << miny
-			//	<< "\t P2x:" << maxx << "\t P2y: " << miny
-			//	<< "\t P3x:" << maxx << "\t P3y: " << maxy
-			//	<< "\t P4x:" << minx << "\t P4y: " << maxy << std::endl;
 #if 1
 			g_marker_data[(y * nbr_marker_squares.x + x) * nbr_of_points_per_marker_square + 4] = rotate2D(g_marker_data[(y * nbr_marker_squares.x + x) * nbr_of_points_per_marker_square + 0], angle_of_rotation);
 			g_marker_data[(y * nbr_marker_squares.x + x) * nbr_of_points_per_marker_square + 5] = rotate2D(g_marker_data[(y * nbr_marker_squares.x + x) * nbr_of_points_per_marker_square + 1], angle_of_rotation);
@@ -946,6 +950,11 @@ int main(int argc, char* argv[])
 
 		GLuint current_program;
 
+		if (g_data_changed) {
+			update_marker_ssbo(g_number_of_markers, g_empty_in_percent, g_distance_to_corner);
+			g_data_changed = false;
+		}
+
 		for(int path = 0; path != 2; ++path){
 			glm::detail::tmat4x4<float, glm::highp> model_view;
 			if (path == 0) {
@@ -967,12 +976,7 @@ int main(int argc, char* argv[])
 					* glm::translate(translate_rot)
 					;
 				current_program = g_LIS_result_program;
-			}
-			
-			if (g_data_changed) {
-				update_marker_ssbo(g_number_of_markers, g_empty_in_percent, g_distance_to_corner);
-				g_data_changed = false;
-			}
+			}			
 
 			glUseProgram(current_program);
 		
@@ -980,14 +984,17 @@ int main(int argc, char* argv[])
 			block_index = glGetProgramResourceIndex(current_program, GL_SHADER_STORAGE_BLOCK, "bit_array_buffer");
 			glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 0, g_bitmap_SSBO);
 
+			block_index = glGetProgramResourceIndex(current_program, GL_SHADER_STORAGE_BLOCK, "bit_array_out_buffer");
+			glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 1, g_bitmap_out_SSBO);
+
 			block_index = glGetProgramResourceIndex(current_program, GL_SHADER_STORAGE_BLOCK, "marker_vector_buffer");
-			glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 1, g_marker_vector_SSBO);
+			glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 2, g_marker_vector_SSBO);
 
 			block_index = glGetProgramResourceIndex(current_program, GL_SHADER_STORAGE_BLOCK, "marker_aaba_buffer");
-			glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 2, g_marker_aaba_SSBO);
+			glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 3, g_marker_aaba_SSBO);
 
 			block_index = glGetProgramResourceIndex(current_program, GL_SHADER_STORAGE_BLOCK, "marker_transform_buffer");
-			glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 3, g_marker_transform_SSBO);
+			glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 4, g_marker_transform_SSBO);
 
 			glUniform1ui(glGetUniformLocation(current_program, "image_byte_length"), (GLuint)g_image_byte_data_size);
 			glUniform2ui(glGetUniformLocation(current_program, "image_dimensions"), g_image_dimensions.x, g_image_dimensions.y);
