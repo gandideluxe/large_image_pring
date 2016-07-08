@@ -67,6 +67,9 @@ const std::string g_file_fragment_shader("../../../source/shader/volume.frag");
 const std::string g_file_vertex_result_shader("../../../source/shader/LIS_transform_result.vert");
 const std::string g_file_fragment_result_shader("../../../source/shader/LIS_transform_result.frag");
 
+const std::string g_file_vertex_view_shader("../../../source/shader/LIS_view_buffer.vert");
+const std::string g_file_fragment_view_shader("../../../source/shader/LIS_view_buffer.frag");
+
 const std::string g_file_compute_result_shader("../../../source/shader/LIS_transform_result.cu");
 
 const std::string g_GUI_file_vertex_shader("../../../source/shader/pass_through_GUI.vert");
@@ -113,6 +116,7 @@ std::vector<glm::vec2> g_marker_transform_coeff_data;
 // Volume Rendering GLSL Program
 GLuint g_LIS_program(0);
 GLuint g_LIS_result_program(0);
+GLuint g_LIS_view_program(0);
 GLuint g_LIS_compute_program(0);
 std::string g_error_message;
 bool g_reload_shader_error = false;
@@ -268,7 +272,7 @@ bool read_bitmap(std::string& volume_string){
 	float max_image_dim = glm::max((float)g_image_dimensions.x, (float)g_image_dimensions.y);
 	float max_image_out_dim = glm::max((float)g_image_out_dimensions.x, (float)g_image_out_dimensions.y);
 	g_plane = Plane(glm::vec2(0.0f), glm::vec2((float)g_image_dimensions.x / max_image_dim, (float)g_image_dimensions.y / max_image_dim));
-	g_plane_out = Plane(glm::vec2(0.0f), glm::vec2((float)g_image_out_dimensions.x/ max_image_out_dim, (float)g_image_out_dimensions.y / max_image_out_dim));
+	g_plane_out = Plane(glm::vec2(0.0f), glm::vec2((float)g_image_out_dimensions.x/ max_image_out_dim * 2, (float)g_image_out_dimensions.y / max_image_out_dim * 2));
 
 	glGenBuffers(1, &g_bitmap_SSBO);
 	glBindBuffer(GL_SHADER_STORAGE_BUFFER, g_bitmap_SSBO);
@@ -808,6 +812,7 @@ int main(int argc, char* argv[])
     try {
 		g_LIS_program = loadShaders(g_file_vertex_shader, g_file_fragment_shader);
 		g_LIS_result_program = loadShaders(g_file_vertex_result_shader, g_file_fragment_result_shader);
+		g_LIS_view_program = loadShaders(g_file_vertex_view_shader, g_file_fragment_view_shader);
 		g_LIS_compute_program = loadComputeShaders(g_file_compute_result_shader);
     }
     catch (std::logic_error& e) {
@@ -839,6 +844,7 @@ int main(int argc, char* argv[])
 
 			GLuint newProgram(0);
 			GLuint newResultProgram(0);
+			GLuint newViewProgram(0);
 			GLuint newComputeProgram(0);
             try {
                 //std::cout << "Reload shaders" << std::endl;
@@ -855,6 +861,7 @@ int main(int argc, char* argv[])
                 g_reload_shader_error = true;
                 newProgram = 0;
 				newResultProgram = 0;
+				newViewProgram = 0;
 				newComputeProgram = 0;
             }
             if (0 != newProgram ) {
@@ -862,6 +869,8 @@ int main(int argc, char* argv[])
 				g_LIS_program = newProgram;
 				glDeleteProgram(g_LIS_result_program);
 				g_LIS_result_program = newResultProgram;
+				glDeleteProgram(g_LIS_view_program);
+				g_LIS_view_program = newViewProgram;
 
                 g_reload_shader_error = false;
             }
@@ -984,9 +993,6 @@ int main(int argc, char* argv[])
 			block_index = glGetProgramResourceIndex(current_program, GL_SHADER_STORAGE_BLOCK, "bit_array_buffer");
 			glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 0, g_bitmap_SSBO);
 
-			block_index = glGetProgramResourceIndex(current_program, GL_SHADER_STORAGE_BLOCK, "bit_array_out_buffer");
-			glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 1, g_bitmap_out_SSBO);
-
 			block_index = glGetProgramResourceIndex(current_program, GL_SHADER_STORAGE_BLOCK, "marker_vector_buffer");
 			glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 2, g_marker_vector_SSBO);
 
@@ -1009,6 +1015,80 @@ int main(int argc, char* argv[])
 			}
 			glUseProgram(0);
 		}
+
+		glUseProgram(g_LIS_compute_program);
+		GLuint block_index = 0;
+		block_index = glGetProgramResourceIndex(current_program, GL_SHADER_STORAGE_BLOCK, "bit_array_buffer");
+		glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 0, g_bitmap_SSBO);
+
+		block_index = glGetProgramResourceIndex(current_program, GL_SHADER_STORAGE_BLOCK, "bit_array_out_buffer");
+		glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 1, g_bitmap_out_SSBO);
+
+		block_index = glGetProgramResourceIndex(current_program, GL_SHADER_STORAGE_BLOCK, "marker_vector_buffer");
+		glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 2, g_marker_vector_SSBO);
+
+		block_index = glGetProgramResourceIndex(current_program, GL_SHADER_STORAGE_BLOCK, "marker_aaba_buffer");
+		glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 3, g_marker_aaba_SSBO);
+
+		block_index = glGetProgramResourceIndex(current_program, GL_SHADER_STORAGE_BLOCK, "marker_transform_buffer");
+		glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 4, g_marker_transform_SSBO);
+
+		glUniform1ui(glGetUniformLocation(current_program, "image_byte_length"), (GLuint)g_image_byte_data_size);
+		glUniform1ui(glGetUniformLocation(current_program, "image_out_byte_length"), (GLuint)g_image_out_byte_data_size);
+		glUniform2ui(glGetUniformLocation(current_program, "image_dimensions"), g_image_dimensions.x, g_image_dimensions.y);
+		glUniform2ui(glGetUniformLocation(current_program, "image_out_dimensions"), g_image_out_dimensions.x, g_image_out_dimensions.y);
+		glUniform2ui(glGetUniformLocation(current_program, "nbr_of_marker"), g_number_of_markers.x, g_number_of_markers.y);
+
+		glDispatchCompute(g_image_out_dimensions.x / 16, g_image_out_dimensions.y / 16, 1);
+
+		glUseProgram(0);
+
+		glFinish();
+
+		glm::detail::tmat4x4<float, glm::highp> model_view;
+		model_view = view
+			* glm::translate(glm::vec3(1.125f, 0.1f, 0.0f))
+			* turntable_matrix
+			* glm::rotate(float(M_PI), glm::vec3(0.0f, 1.0f, 0.0f))
+			* glm::rotate(float(M_PI), glm::vec3(1.0f, 0.0f, 0.0f))
+			* glm::translate(translate_rot)
+			;
+		current_program = g_LIS_view_program;			
+
+		glUseProgram(current_program);
+		
+		block_index = 0;
+		block_index = glGetProgramResourceIndex(current_program, GL_SHADER_STORAGE_BLOCK, "bit_array_buffer");
+		glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 0, g_bitmap_SSBO);
+
+		block_index = glGetProgramResourceIndex(current_program, GL_SHADER_STORAGE_BLOCK, "bit_array_out_buffer");
+		glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 1, g_bitmap_out_SSBO);
+
+		block_index = glGetProgramResourceIndex(current_program, GL_SHADER_STORAGE_BLOCK, "marker_vector_buffer");
+		glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 2, g_marker_vector_SSBO);
+
+		block_index = glGetProgramResourceIndex(current_program, GL_SHADER_STORAGE_BLOCK, "marker_aaba_buffer");
+		glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 3, g_marker_aaba_SSBO);
+
+		block_index = glGetProgramResourceIndex(current_program, GL_SHADER_STORAGE_BLOCK, "marker_transform_buffer");
+		glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 4, g_marker_transform_SSBO);
+
+		glUniform1ui(glGetUniformLocation(current_program, "image_byte_length"), (GLuint)g_image_byte_data_size);
+		glUniform1ui(glGetUniformLocation(current_program, "image_out_byte_length"), (GLuint)g_image_out_byte_data_size);
+		glUniform2ui(glGetUniformLocation(current_program, "image_dimensions"), g_image_dimensions.x, g_image_dimensions.y);
+		glUniform2ui(glGetUniformLocation(current_program, "image_out_dimensions"), g_image_out_dimensions.x, g_image_out_dimensions.y);
+		glUniform2ui(glGetUniformLocation(current_program, "nbr_of_marker"), g_number_of_markers.x, g_number_of_markers.y);
+
+		glUniformMatrix4fv(glGetUniformLocation(current_program, "Projection"), 1, GL_FALSE,
+			glm::value_ptr(projection));
+		glUniformMatrix4fv(glGetUniformLocation(current_program, "Modelview"), 1, GL_FALSE,
+			glm::value_ptr(model_view));
+		if (!g_pause) {
+			g_plane_out.draw();
+		}
+		
+		glUseProgram(0);
+		
 
 		error = glGetError();
 		if (error)
@@ -1043,6 +1123,7 @@ int main(int argc, char* argv[])
 
 	glDeleteProgram(g_LIS_compute_program);
 	glDeleteProgram(g_LIS_result_program);
+	glDeleteProgram(g_LIS_view_program);
 	glDeleteProgram(g_LIS_program);
 
     ImGui::Shutdown();

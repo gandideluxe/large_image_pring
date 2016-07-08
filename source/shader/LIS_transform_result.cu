@@ -3,17 +3,17 @@
 #extension GL_NV_gpu_shader5 : require
 #extension GL_ARB_explicit_attrib_location : require
 
+layout(local_size_x = 16, local_size_y = 16) in;
 
 layout(std430, binding = 0) buffer bit_array_buffer
 {
 	uint data[];
 };
 
-layout(std430, binding = 1) buffer bit_array_buffer
+layout(std430, binding = 1) buffer bit_array_out_buffer
 {
 	uint data_out[];
 };
-
 
 layout(std430, binding = 2) buffer marker_vector_buffer
 {
@@ -30,8 +30,6 @@ layout(std430, binding = 4) buffer marker_transform_buffer
 	vec4  marker_affine_transform_coeffs[]; //1 vec4 = a[4] 1 vec4 = b[4]
 };
 
-
-layout(location = 0) out vec4 FragColor;
 
 uniform mat4 Modelview;
 
@@ -214,15 +212,15 @@ void main()
 	//vec4 dst = get_sample_data(frag_uv);
 	vec4 dst = vec4(0.0);
 	//check square
-	int index = intersect(frag_uv, 0, 1);
+	//int index = intersect(frag_uv, 0, 1);
 
-	if (index != -1) {
+	//if (index != -1) {
 
-		vec4 sample_data = affine_transform_color(frag_uv, index);
+	//	vec4 sample_data = affine_transform_color(frag_uv, index);
 
-		//dst += /*vec4(0.0, 0.2, 0.0, 0.0) +*/ abs(sample_data - vec4(frag_uv, 0.0, 0.0));
-		dst = /*vec4(0.0, 0.1, 0.0, 0.0) + */sample_data;
-	}
+	//	//dst += /*vec4(0.0, 0.2, 0.0, 0.0) +*/ abs(sample_data - vec4(frag_uv, 0.0, 0.0));
+	//	dst = /*vec4(0.0, 0.1, 0.0, 0.0) + */sample_data;
+	//}
 
 
 
@@ -230,5 +228,5 @@ void main()
 	//if (index != -1)
 	//	dst += vec4(0.0, 0.0, 0.1, 0.0);
 
-	FragColor = dst;
+	//FragColor = dst;
 }
