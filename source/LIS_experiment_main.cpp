@@ -82,7 +82,7 @@ GLuint loadShaders(std::string const& vs, std::string const& fs)
 GLuint loadComputeShaders(std::string const& cs)
 {
 	std::string v = readFile(cs);
-	return createProgram(cs);
+	return createProgram(v);
 }
 
 
@@ -106,6 +106,9 @@ size_t g_image_byte_data_size;
 unsigned g_channel_size;
 unsigned g_channel_count;
 
+std::vector<glm::vec2> g_marker_data;
+std::vector<glm::vec4> g_aaba_data;
+std::vector<glm::vec2> g_marker_transform_coeff_data;
 // Volume Rendering GLSL Program
 GLuint g_LIS_program(0);
 GLuint g_LIS_result_program(0);
@@ -113,15 +116,18 @@ GLuint g_LIS_compute_program(0);
 std::string g_error_message;
 bool g_reload_shader_error = false;
 
+const int nbr_of_points_per_marker_square = 8;
+
 // imgui variables
 static bool g_show_gui = true;
+
+#define MAX_SUPPORTET_MARKER 32 * 32
 
 GLuint g_bitmap_SSBO = 0;
 GLuint g_marker_vector_SSBO = 0;
 GLuint g_marker_aaba_SSBO = 0;
-GLuint g_marker_bah_SSBO = 0;
+GLuint g_marker_transform_SSBO = 0;
 
-glm::uvec2 g_number_of_markers(2);
 
 static GLuint fontTex;
 static bool mousePressed[2] = { false, false };
@@ -137,15 +143,18 @@ bool g_over_gui = false;
 bool g_reload_shader = false;
 bool g_reload_shader_pressed = false;
 
-int g_task_chosen = 21;
-int g_task_chosen_old = g_task_chosen;
-
 bool  g_pause = false;
 
+//Test Variables
+float g_angle_of_rotation = 0.1f;
+
+glm::ivec2 g_number_of_markers(1);
+glm::vec2 g_distance_to_corner = glm::vec2(0.01f);
+glm::vec2 g_empty_in_percent = glm::vec2(20.0f);
+
+bool g_data_changed = true;
+
 Plane g_plane;
-
-int g_bilinear_interpolation = true;
-
 
 
 struct Manipulator
@@ -235,7 +244,7 @@ bool read_bitmap(std::string& volume_string){
     // loading volume file data
 	g_image_data = g_image_loader.load_bitmap(g_file_string);
 #else
-	int mode = 3;
+	int mode = 2;
 
 	g_image_dimensions = glm::uvec2(4000u, 4000u);
 	g_image_data[0] = g_image_loader.generate_artificial_test_byte_map(mode, g_image_dimensions);
@@ -266,157 +275,184 @@ bool read_bitmap(std::string& volume_string){
     return (bool)g_bitmap_SSBO;
 }
 
+void
+calc_and_write_affine_transforamtion(std::vector<glm::vec2>& point_data, std::vector<glm::vec4>& affine_transform_result) {
+
+	glm::vec2 src[4];
+
+	for (unsigned index = 0; index != point_data.size() / nbr_of_points_per_marker_square; ++index) {
+
+		src[0] = point_data[(index * nbr_of_points_per_marker_square) + 0];
+		src[1] = point_data[(index * nbr_of_points_per_marker_square) + 1];
+		src[2] = point_data[(index * nbr_of_points_per_marker_square) + 2];
+		src[3] = point_data[(index * nbr_of_points_per_marker_square) + 3];
+
+		glm::vec2 dst[4];
+
+		dst[0] = point_data[(index * nbr_of_points_per_marker_square) + 0 + (nbr_of_points_per_marker_square / 2)];
+		dst[1] = point_data[(index * nbr_of_points_per_marker_square) + 1 + (nbr_of_points_per_marker_square / 2)];
+		dst[2] = point_data[(index * nbr_of_points_per_marker_square) + 2 + (nbr_of_points_per_marker_square / 2)];
+		dst[3] = point_data[(index * nbr_of_points_per_marker_square) + 3 + (nbr_of_points_per_marker_square / 2)];
+
+		//calc affine transform
+		float x1 = dst[0].x;
+		float x2 = dst[1].x;
+		float x3 = dst[2].x;
+		float x4 = dst[3].x;
+
+		float y1 = dst[0].y;
+		float y2 = dst[1].y;
+		float y3 = dst[2].y;
+		float y4 = dst[3].y;
+
+		glm::vec4 vxn = glm::vec4(src[0].x, src[1].x, src[2].x, src[3].x);
+		glm::vec4 vyn = glm::vec4(src[0].y, src[1].y, src[2].y, src[3].y);
+		/*mat4 M = mat4(x1, y1, x1*y1, 1,
+		x2, y2, x2*y2, 1,
+		x3, y3, x3*y3, 1,
+		x4, y4, x4*y4, 1
+		);
+		*/
+		glm::mat4x4 M = glm::mat4x4(x1,		x2,		x3,		x4,
+									y1,		y2,		y3,		y4,
+									x1*y1,	x2*y2,	x3*y3,	x4*y4,
+									1,		1,		1,		1
+								);
+
+
+
+		auto inverseM = glm::inverse(M);
+
+		//a = M^ * x;
+		glm::vec4 a = inverseM * vxn;
+		glm::vec4 b = inverseM * vyn;
+		
+		affine_transform_result[2u * index + 0] = a;
+		affine_transform_result[2u * index + 1] = b;
+	}	
+}
+
 
 bool generate_marker_ssbo(glm::vec2 nbr_marker_squares, glm::vec2 distance_in_percent, glm::vec2 distance_to_corner) {
 
-	/*
-	generate some synthetic marker
-	assuming square printing job
-	*/
+
+	g_marker_data.resize(nbr_marker_squares.x * nbr_marker_squares.y * nbr_of_points_per_marker_square);
+	Bounding_area_hierarchie bah(g_marker_data, glm::vec2(), glm::vec2());
+	std::vector<glm::vec4> aaba = bah.get_aaba();
+	std::vector<glm::vec4> g_marker_transform_coeff_data;
+	g_marker_transform_coeff_data.resize(nbr_marker_squares.x * nbr_marker_squares.y * 2u);
+
+	
+
+	glGenBuffers(1, &g_marker_vector_SSBO);
+	glBindBuffer(GL_SHADER_STORAGE_BUFFER, g_marker_vector_SSBO);
+	glBufferData(GL_SHADER_STORAGE_BUFFER, (size_t)MAX_SUPPORTET_MARKER * nbr_of_points_per_marker_square * sizeof(glm::vec2), &g_marker_data[0], GL_DYNAMIC_COPY);
+	glBindBuffer(GL_SHADER_STORAGE_BUFFER, 0);
+
+	glGenBuffers(1, &g_marker_aaba_SSBO);
+	glBindBuffer(GL_SHADER_STORAGE_BUFFER, g_marker_aaba_SSBO);
+	glBufferData(GL_SHADER_STORAGE_BUFFER, (size_t)MAX_SUPPORTET_MARKER * sizeof(glm::vec4), &aaba[0], GL_DYNAMIC_COPY);
+	glBindBuffer(GL_SHADER_STORAGE_BUFFER, 0);
+
+	glGenBuffers(1, &g_marker_transform_SSBO);
+	glBindBuffer(GL_SHADER_STORAGE_BUFFER, g_marker_transform_SSBO);
+	glBufferData(GL_SHADER_STORAGE_BUFFER, (size_t)MAX_SUPPORTET_MARKER * 2 * sizeof(glm::vec4), &g_marker_transform_coeff_data[0], GL_DYNAMIC_COPY);
+	glBindBuffer(GL_SHADER_STORAGE_BUFFER, 0);
+
+	return true;
+}
+
+bool
+update_marker_ssbo(glm::vec2 nbr_marker_squares, glm::vec2 distance_in_percent, glm::vec2 distance_to_corner) {
 
 	glm::vec2 init_left_uper_corner = distance_to_corner;
-	glm::vec2 init_right_downer_corner = glm::vec2(1.0f - distance_to_corner.x,  1.0f - distance_to_corner.y);
+	glm::vec2 init_right_downer_corner = glm::vec2(1.0f - distance_to_corner.x, 1.0f - distance_to_corner.y);
 
-	glm::vec2 length_available = glm::vec2(1.0f) - (distance_to_corner * 2.0f);
-	glm::vec2 length_used_for_distance = length_available * (distance_in_percent / 100.0f);
-	glm::vec2 length_left_for_squares = length_available - length_used_for_distance;
-	glm::vec2 length_square = length_left_for_squares / nbr_marker_squares;
-	glm::vec2 length_distance = length_used_for_distance / nbr_marker_squares;
+	glm::vec2 nbr_of_gaps = nbr_marker_squares - glm::vec2(1.0f);
 
-	std::vector<glm::vec2> marker_data;
+	glm::vec2 length_available = glm::vec2(1.0f) - distance_to_corner * 2.0f;
+	glm::vec2 length_used_for_distance = length_available * (distance_in_percent / 100.0f) * glm::min(nbr_of_gaps, glm::vec2(1.0f));
+	
+	glm::vec2 length_distance = glm::vec2(0.0f);
+	if (nbr_marker_squares.x > 1)
+		length_distance.x = length_used_for_distance.x / (nbr_marker_squares.x - 1.0f);
+	if (nbr_marker_squares.y > 1)
+		length_distance.y = length_used_for_distance.y / (nbr_marker_squares.y - 1.0f);
+
+	glm::vec2 length_square = (length_available - length_distance * (nbr_marker_squares - glm::vec2(1.0))) / nbr_marker_squares;
+	
+
+
+	//std::vector<glm::vec2> marker_data;
 
 	glm::vec2 area_min = glm::vec2(init_left_uper_corner.x, init_left_uper_corner.y);
 	glm::vec2 area_max = glm::vec2(1.0f - init_left_uper_corner.x, 1.0f - init_left_uper_corner.y);
 
-	float angle_of_rotation = 0.05f;
+	float angle_of_rotation = g_angle_of_rotation;
 
-	const int nbr_of_points_per_marker_square = 8;
-	marker_data.resize(nbr_marker_squares.x * nbr_marker_squares.y * nbr_of_points_per_marker_square);
+	g_marker_data.resize(nbr_marker_squares.x * nbr_marker_squares.y * nbr_of_points_per_marker_square);
 
 
-	for (unsigned i = 0; i != nbr_marker_squares.y; ++i) {
-		for (unsigned j = 0; j != nbr_marker_squares.x; ++j) {
-			float minx = init_left_uper_corner.x + j * length_distance.x + j * length_square.y;
-			float maxx = init_left_uper_corner.x + j * length_distance.x + j * length_square.y + length_square.y;
-			
-			
-			float miny = init_left_uper_corner.y + i * length_distance.y + i * length_square.y;
-			float maxy = init_left_uper_corner.y + i * length_distance.y + i * length_square.y + length_square.y;
-		
-			marker_data[(i * nbr_marker_squares.x + j) * nbr_of_points_per_marker_square + 0] = glm::vec2(minx, miny);
-			marker_data[(i * nbr_marker_squares.x + j) * nbr_of_points_per_marker_square + 1] = glm::vec2(maxx, miny);
-			marker_data[(i * nbr_marker_squares.x + j) * nbr_of_points_per_marker_square + 2] = glm::vec2(maxx, maxy);
-			marker_data[(i * nbr_marker_squares.x + j) * nbr_of_points_per_marker_square + 3] = glm::vec2(minx, maxy);
-#if 0
-			marker_data[(i * nbr_marker_squares.x + j) * nbr_of_points_per_marker_square + 4] = rotate2D(marker_data[(i * nbr_marker_squares.x + j) * nbr_of_points_per_marker_square + 0], angle_of_rotation);
-			marker_data[(i * nbr_marker_squares.x + j) * nbr_of_points_per_marker_square + 5] = rotate2D(marker_data[(i * nbr_marker_squares.x + j) * nbr_of_points_per_marker_square + 1], angle_of_rotation);
-			marker_data[(i * nbr_marker_squares.x + j) * nbr_of_points_per_marker_square + 6] = rotate2D(marker_data[(i * nbr_marker_squares.x + j) * nbr_of_points_per_marker_square + 2], angle_of_rotation);
-			marker_data[(i * nbr_marker_squares.x + j) * nbr_of_points_per_marker_square + 7] = rotate2D(marker_data[(i * nbr_marker_squares.x + j) * nbr_of_points_per_marker_square + 3], angle_of_rotation);				
+	for (unsigned y = 0; y != nbr_marker_squares.y; ++y) {
+		for (unsigned x = 0; x != nbr_marker_squares.x; ++x) {
+			float minx = init_left_uper_corner.x + x * length_distance.x + x * length_square.x;
+			float maxx = init_left_uper_corner.x + x * length_distance.x + x * length_square.x + length_square.x;
+
+			float miny = init_left_uper_corner.y + y * length_distance.y + y * length_square.y;
+			float maxy = init_left_uper_corner.y + y * length_distance.y + y * length_square.y + length_square.y;
+
+			g_marker_data[(y * nbr_marker_squares.x + x) * nbr_of_points_per_marker_square + 0] = glm::vec2(minx, miny);
+			g_marker_data[(y * nbr_marker_squares.x + x) * nbr_of_points_per_marker_square + 1] = glm::vec2(maxx, miny);
+			g_marker_data[(y * nbr_marker_squares.x + x) * nbr_of_points_per_marker_square + 2] = glm::vec2(maxx, maxy);
+			g_marker_data[(y * nbr_marker_squares.x + x) * nbr_of_points_per_marker_square + 3] = glm::vec2(minx, maxy);
+
+			//std::cout << "P1x:" << minx << "\t P1y:" << miny
+			//	<< "\t P2x:" << maxx << "\t P2y: " << miny
+			//	<< "\t P3x:" << maxx << "\t P3y: " << maxy
+			//	<< "\t P4x:" << minx << "\t P4y: " << maxy << std::endl;
+#if 1
+			g_marker_data[(y * nbr_marker_squares.x + x) * nbr_of_points_per_marker_square + 4] = rotate2D(g_marker_data[(y * nbr_marker_squares.x + x) * nbr_of_points_per_marker_square + 0], angle_of_rotation);
+			g_marker_data[(y * nbr_marker_squares.x + x) * nbr_of_points_per_marker_square + 5] = rotate2D(g_marker_data[(y * nbr_marker_squares.x + x) * nbr_of_points_per_marker_square + 1], angle_of_rotation);
+			g_marker_data[(y * nbr_marker_squares.x + x) * nbr_of_points_per_marker_square + 6] = rotate2D(g_marker_data[(y * nbr_marker_squares.x + x) * nbr_of_points_per_marker_square + 2], angle_of_rotation);
+			g_marker_data[(y * nbr_marker_squares.x + x) * nbr_of_points_per_marker_square + 7] = rotate2D(g_marker_data[(y * nbr_marker_squares.x + x) * nbr_of_points_per_marker_square + 3], angle_of_rotation);
 #else
-			marker_data[(i * nbr_marker_squares.x + j) * nbr_of_points_per_marker_square + 4] = glm::vec2(minx + 0.01f, miny);
-			marker_data[(i * nbr_marker_squares.x + j) * nbr_of_points_per_marker_square + 5] = glm::vec2(maxx, miny - 0.01f);
-			marker_data[(i * nbr_marker_squares.x + j) * nbr_of_points_per_marker_square + 6] = glm::vec2(maxx, maxy);
-			marker_data[(i * nbr_marker_squares.x + j) * nbr_of_points_per_marker_square + 7] = glm::vec2(minx, maxy);
+			g_marker_data[(y * nbr_marker_squares.x + x) * nbr_of_points_per_marker_square + 4] = glm::vec2(minx + 0.01f, miny);
+			g_marker_data[(y * nbr_marker_squares.x + x) * nbr_of_points_per_marker_square + 5] = glm::vec2(maxx, miny - 0.01f);
+			g_marker_data[(y * nbr_marker_squares.x + x) * nbr_of_points_per_marker_square + 6] = glm::vec2(maxx, maxy);
+			g_marker_data[(y * nbr_marker_squares.x + x) * nbr_of_points_per_marker_square + 7] = glm::vec2(minx, maxy);
 #endif
 		}
 	}
 
 	//generate BAH
-	Bounding_area_hierarchie bah(marker_data, area_min, area_max);
-	//convert BAH to binary data used on the GPU for traversal
-	//struct BinaryGLSLNode
-	//{
-	//	glm::vec2 aaba_min;
-	//	glm::vec2 aaba_max;
-	//	
-	//	int left_child;
-	//	int right_child;
-	//	
-	//	int marker_index; // if != -1 not a leaf
-	//};
+	Bounding_area_hierarchie bah(g_marker_data, area_min, area_max);
+	std::vector<glm::vec4> aaba = bah.get_aaba();
 
-	auto aaba = bah.get_aaba();
+	//calc affine transform
+	std::vector<glm::vec4> g_marker_transform_coeff_data;
+	g_marker_transform_coeff_data.resize(nbr_marker_squares.x * nbr_marker_squares.y * 2u);
+	calc_and_write_affine_transforamtion(g_marker_data, g_marker_transform_coeff_data);
 
-	//for (auto b : aaba) {
-
-	//	std::cout << "xmin: " << b.x << " ymin: " << b.y << " xmax: " << b.z << " ymax: " << b.w << std::endl;
-	//}
-
-	//std::vector<BinaryGLSLNode> glsl_data;
-
-	//BinaryGLSLNode root_node;
-	//root_node.marker_index = 0;
-	//bah.root->index = 0;
-	//glsl_data.push_back(root_node);
-
-	//std::stack<Bounding_area_hierarchie::Node*> node_stack;
-	//node_stack.push(bah.root);
-
-	//while (!node_stack.empty()) {
-	//	auto current_node = node_stack.top();
-	//	node_stack.pop();
-
-	//	if (!current_node->leaf) {
-
-
-	//		BinaryGLSLNode new_glsl_left_node;
-	//		BinaryGLSLNode new_glsl_right_node;
-
-	//		new_glsl_left_node.aaba_min = current_node->ba_min;
-	//		new_glsl_right_node.aaba_max = current_node->ba_max;
-
-	//		new_glsl_left_node.marker_index = 0;
-	//		new_glsl_right_node.marker_index = 0;
-
-	//		node_stack.push(current_node->left_child);
-	//		node_stack.push(current_node->right_child);
-
-	//		glsl_data.push_back(new_glsl_left_node);
-	//		int left_index = glsl_data.size() - 1;
-	//		
-	//		glsl_data[current_node->index].left_child = left_index;
-	//		current_node->left_child_index = left_index;
-	//		current_node->left_child->index = left_index;
-
-	//		glsl_data.push_back(new_glsl_right_node);
-	//		int right_index = glsl_data.size() - 1;
-	//		
-	//		glsl_data[current_node->index].right_child = left_index;
-	//		current_node->right_child_index = right_index;
-	//		current_node->right_child->index = right_index;
-
-	//		glsl_data[current_node->index].marker_index = -1;
-	//		
-	//	}
-	//	else {
-	//		assert(current_node->markers_indices.size() == 1);
-
-	//		glsl_data[current_node->index].aaba_min = current_node->ba_min;
-	//		glsl_data[current_node->index].aaba_max = current_node->ba_max;
-	//		glsl_data[current_node->index].marker_index = current_node->markers_indices[0];
-	//		glsl_data[current_node->index].left_child = -1;
-	//		glsl_data[current_node->index].right_child = -1;
-	//	}
-	//}
-
-	glGenBuffers(1, &g_marker_vector_SSBO);
 	glBindBuffer(GL_SHADER_STORAGE_BUFFER, g_marker_vector_SSBO);
-	glBufferData(GL_SHADER_STORAGE_BUFFER, (size_t)nbr_marker_squares.x * nbr_marker_squares.y * nbr_of_points_per_marker_square * sizeof(glm::vec2), &marker_data[0], GL_DYNAMIC_COPY);
+	GLvoid* p = glMapBuffer(GL_SHADER_STORAGE_BUFFER, GL_WRITE_ONLY);
+	memcpy(p, &g_marker_data[0], (size_t)nbr_marker_squares.x * nbr_marker_squares.y * nbr_of_points_per_marker_square * sizeof(glm::vec2));
+	glUnmapBuffer(GL_SHADER_STORAGE_BUFFER);
 	glBindBuffer(GL_SHADER_STORAGE_BUFFER, 0);
 
-	glGenBuffers(1, &g_marker_aaba_SSBO);
 	glBindBuffer(GL_SHADER_STORAGE_BUFFER, g_marker_aaba_SSBO);
-	glBufferData(GL_SHADER_STORAGE_BUFFER, aaba.size() * sizeof(glm::vec4), &aaba[0], GL_DYNAMIC_COPY);
+	p = glMapBuffer(GL_SHADER_STORAGE_BUFFER, GL_WRITE_ONLY);
+	memcpy(p, &aaba[0], aaba.size() * sizeof(glm::vec4));
+	glUnmapBuffer(GL_SHADER_STORAGE_BUFFER);
 	glBindBuffer(GL_SHADER_STORAGE_BUFFER, 0);
 
-	//glGenBuffers(1, &g_marker_bah_SSBO);
-	//glBindBuffer(GL_SHADER_STORAGE_BUFFER, g_marker_bah_SSBO);
-	//glBufferData(GL_SHADER_STORAGE_BUFFER, glsl_data.size() * sizeof(BinaryGLSLNode), &glsl_data[0], GL_DYNAMIC_COPY);
-	//glBindBuffer(GL_SHADER_STORAGE_BUFFER, 0);
+	glBindBuffer(GL_SHADER_STORAGE_BUFFER, g_marker_transform_SSBO);
+	p = glMapBuffer(GL_SHADER_STORAGE_BUFFER, GL_WRITE_ONLY);
+	memcpy(p, &g_marker_transform_coeff_data[0], g_marker_transform_coeff_data.size() * sizeof(glm::vec4));
+	glUnmapBuffer(GL_SHADER_STORAGE_BUFFER);
+	glBindBuffer(GL_SHADER_STORAGE_BUFFER, 0);
 
 	return true;
 }
-
 
 // This is the main rendering function that you have to implement and provide to ImGui (via setting up 'RenderDrawListsFn' in the ImGuiIO structure)
 // If text or lines are blurry when integrating ImGui in your engine:
@@ -635,42 +671,58 @@ void showGUI(){
     }
     const float ms_per_frame_avg = ms_per_frame_accum / ms_per_frame.size();
 
-    if (ImGui::CollapsingHeader("Task", 0, true, true))
-    {
-        ImGui::Text("Data");
-        ImGui::RadioButton("Max Intensity Projection", &g_task_chosen, 21);
-        ImGui::RadioButton("Average Intensity Projection", &g_task_chosen, 22);
+	if (ImGui::CollapsingHeader("Test variables", 0, true, true))
+	{
+		bool load_LIS_1 = false;
+		
+		ImGui::Text("Environment");
+		ImGui::Text("d corner");
+		//ImGui::SameLine();		
+		//ImGui::PushItemWidth(ImGui::GetWindowWidth() * 0.35f);
+		g_data_changed ^= ImGui::SliderFloat("xc", &g_distance_to_corner.x, 0.0, 0.5, "%.3f", 1.0f);
+		//ImGui::SameLine();
+		//ImGui::PushItemWidth(ImGui::GetWindowWidth() * 0.35f);
+		g_data_changed ^= ImGui::SliderFloat("yc", &g_distance_to_corner.y, 0.0, 0.5, "%.3f", 1.0f);
 
-        if (g_task_chosen != g_task_chosen_old){
-            g_reload_shader = true;
-            g_task_chosen_old = g_task_chosen;
-        }
-    }
+		ImGui::Text("Number m");
+		//ImGui::SameLine();
+		g_data_changed ^= ImGui::InputInt("xm", &g_number_of_markers.x);
+		//ImGui::SameLine();
+		g_data_changed ^= ImGui::InputInt("ym", &g_number_of_markers.y);
 
-    if (ImGui::CollapsingHeader("Load Volumes", 0, true, false))
+		g_number_of_markers = glm::max(g_number_of_markers, glm::ivec2(1));
+
+		ImGui::Text("empty pe");
+		g_data_changed ^= ImGui::SliderFloat("xp", &g_empty_in_percent.x, -10.0, 100.0, "%.3f", 1.0f);
+		g_data_changed ^= ImGui::SliderFloat("yp", &g_empty_in_percent.y, -10.0, 100.0, "%.3f", 1.0f);
+		
+		ImGui::Text("Transformation");
+		g_data_changed ^= ImGui::SliderFloat("Angle rotation", &g_angle_of_rotation, -glm::pi<float>() , glm::pi<float>(), "%.3f", 1.0f);
+
+	}
+
+    if (ImGui::CollapsingHeader("Load LIS data", 0, true, false))
     {
 		bool load_LIS_1 = false;
         bool load_LIS_2 = false;
         bool load_LIS_3 = false;
 
         ImGui::Text("Volumes");
-		load_LIS_1 ^= ImGui::Button("Load Volume Head");
-
-		
+		load_LIS_1 ^= ImGui::Button("Load LIS 1");
+				
         if (load_LIS_1){
             g_file_string = "../../../data/head_w256_h256_d225_c1_b8.raw";
             
-        }
+    }
         
 }
-
-
+	
 
     if (ImGui::CollapsingHeader("Quality Settings"))
     {
         ImGui::Text("Interpolation");
-        ImGui::RadioButton("Nearest Neighbour", &g_bilinear_interpolation, 0);
-        ImGui::RadioButton("Bilinear", &g_bilinear_interpolation, 1);
+        //ImGui::RadioButton("Nearest Neighbour", &g_bilinear_interpolation, 0);
+        //ImGui::RadioButton("Bilinear", &g_bilinear_interpolation, 1);
 
   }
 
@@ -745,7 +797,7 @@ int main(int argc, char* argv[])
 
     // init and upload volume texture
     bool check = read_bitmap(g_file_string);
-	check = generate_marker_ssbo(g_number_of_markers, glm::vec2(2.0f), glm::vec2(0.05f));
+	check = generate_marker_ssbo(g_number_of_markers, g_empty_in_percent, g_distance_to_corner);
    
     // loading actual raytracing shader code (volume.vert, volume.frag)
     // edit volume.frag to define the result of our volume raycaster  
@@ -840,8 +892,6 @@ int main(int argc, char* argv[])
             g_reload_shader_pressed = false;
         }
 
-
-
         glm::ivec2 size = g_win.windowSize();
         glViewport(0, 0, size.x, size.y);
         glClearColor(g_background_color.x, g_background_color.y, g_background_color.z, 1.0);
@@ -869,21 +919,22 @@ int main(int argc, char* argv[])
 
 
 
-		glBindBuffer(GL_SHADER_STORAGE_BUFFER, g_bitmap_SSBO);
-		//download
-		GLvoid* p = glMapBuffer(GL_SHADER_STORAGE_BUFFER, GL_READ_ONLY);
-		memcpy(&g_image_data[current_download_buffer][0], p, sizeof(g_image_byte_data_size));
-		glUnmapBuffer(GL_SHADER_STORAGE_BUFFER);
+		//glBindBuffer(GL_SHADER_STORAGE_BUFFER, g_bitmap_SSBO);
+		////download
+		//GLvoid* p = glMapBuffer(GL_SHADER_STORAGE_BUFFER, GL_READ_ONLY);
+		//memcpy(&g_image_data[current_download_buffer][0], p, sizeof(g_image_byte_data_size));
+		//glUnmapBuffer(GL_SHADER_STORAGE_BUFFER);
 
-		glFinish();
+		//glFinish();
 
-		//upload
-		p = glMapBuffer(GL_SHADER_STORAGE_BUFFER, GL_WRITE_ONLY);
-		memcpy(p, &g_image_data[current_upload_buffer][0], sizeof(g_image_byte_data_size));
-		glUnmapBuffer(GL_SHADER_STORAGE_BUFFER);
+		////upload
+		//p = glMapBuffer(GL_SHADER_STORAGE_BUFFER, GL_WRITE_ONLY);
+		//memcpy(p, &g_image_data[current_upload_buffer][0], sizeof(g_image_byte_data_size));
+		//glUnmapBuffer(GL_SHADER_STORAGE_BUFFER);
 
-		glFinish();
+		//glFinish();
 
+		//glBindBuffer(GL_SHADER_STORAGE_BUFFER, 0);
 
 		int tmp_buffer = current_download_buffer;
 		current_download_buffer = current_upload_buffer;
@@ -918,6 +969,11 @@ int main(int argc, char* argv[])
 				current_program = g_LIS_result_program;
 			}
 			
+			if (g_data_changed) {
+				update_marker_ssbo(g_number_of_markers, g_empty_in_percent, g_distance_to_corner);
+				g_data_changed = false;
+			}
+
 			glUseProgram(current_program);
 		
 			GLuint block_index = 0;
@@ -930,8 +986,8 @@ int main(int argc, char* argv[])
 			block_index = glGetProgramResourceIndex(current_program, GL_SHADER_STORAGE_BLOCK, "marker_aaba_buffer");
 			glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 2, g_marker_aaba_SSBO);
 
-			block_index = glGetProgramResourceIndex(current_program, GL_SHADER_STORAGE_BLOCK, "marker_bah_buffer");
-			glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 3, g_marker_aaba_SSBO);
+			block_index = glGetProgramResourceIndex(current_program, GL_SHADER_STORAGE_BLOCK, "marker_transform_buffer");
+			glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 3, g_marker_transform_SSBO);
 
 			glUniform1ui(glGetUniformLocation(current_program, "image_byte_length"), (GLuint)g_image_byte_data_size);
 			glUniform2ui(glGetUniformLocation(current_program, "image_dimensions"), g_image_dimensions.x, g_image_dimensions.y);

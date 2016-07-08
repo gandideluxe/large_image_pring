@@ -34,69 +34,13 @@ public:
 		glm::vec2 p1, p2, p3, p4;
 	};
 
-	struct Node
-	{
-		Node()
-			: ba_min(0.0, 0.0)
-			, ba_max(1.0, 1.0)
-			, leaf(true)
-			, left_child(nullptr)
-			, right_child(nullptr)
-			, index(-1)
-			, parent_index(0)
-			, left_child_index(0)
-			, right_child_index(0)
-		{}
-
-		Node(glm::vec2 pos_max, glm::vec2 pos_min)
-			: ba_min(pos_min)
-			, ba_max(pos_max)
-			, leaf(true)
-			, left_child(nullptr)
-			, right_child(nullptr)
-			, index(-1)
-			, parent_index(0)
-			, left_child_index(0)
-			, right_child_index(0)
-		{}
-
-		~Node() { delete left_child, delete right_child; }
-
-		std::vector<int> markers_indices;
-
-		glm::vec2 ba_min;
-		glm::vec2 ba_max;
-		unsigned  index_left;
-		unsigned  index_right;
-
-		axis split_axis;
-
-		bool leaf;
-		
-		Node* left_child;
-		Node* right_child;
-
-		int index;
-		int parent_index; 		
-		int left_child_index;
-		int right_child_index;
-
-
-	};
-
 	Bounding_area_hierarchie(std::vector<glm::vec2>& marker_squares, 
 							 const glm::vec2 min = glm::vec2(-0.0f), 
 							 const glm::vec2 max = glm::vec2(1.0f));
-	~Bounding_area_hierarchie();
-
-	void generate_child_nodes(Node* node, 
-		std::vector<glm::vec2>& marker,
-		std::vector<glm::vec4>& aabr);
+	
 
 	std::vector<glm::vec4> get_aaba();
 
-public:
-	Node* root;
 
 private:
 	std::vector<glm::vec4> aabr;
