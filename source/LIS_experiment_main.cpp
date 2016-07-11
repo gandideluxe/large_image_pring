@@ -1,4 +1,4 @@
-// -----------------------------------------------------------------------------
+﻿// -----------------------------------------------------------------------------
 // Copyright  : (C) 2014 Andreas-C. Bernstein
 //                  2015 Sebastian Thiele
 // License    : MIT (see the file LICENSE)
@@ -105,8 +105,9 @@ Window g_win(g_window_res);
 LIS_bitmap_loader_raw g_image_loader;
 image_data_type g_image_data;
 image_data_type g_image_out_data;
-glm::uvec2 g_image_dimensions = glm::uvec2(4000u, 4000u);
+glm::uvec2 g_image_dimensions = glm::uvec2(40000u, 40000u);
 glm::uvec2 g_image_out_dimensions = glm::uvec2(g_image_dimensions.x, 144u);
+//glm::uvec2 g_image_out_dimensions = g_image_dimensions;
 size_t g_image_byte_data_size = 0;
 size_t g_image_out_byte_data_size = 0;
 
@@ -126,13 +127,14 @@ const int nbr_of_points_per_marker_square = 8;
 // imgui variables
 static bool g_show_gui = true;
 
-#define MAX_SUPPORTET_MARKER 32 * 32
+#define MAX_SUPPORTET_MARKER 16 * 16
 
 GLuint g_bitmap_SSBO = 0;
 GLuint g_bitmap_out_SSBO = 0;
 GLuint g_marker_vector_SSBO = 0;
 GLuint g_marker_aaba_SSBO = 0;
 GLuint g_marker_transform_SSBO = 0;
+GLuint g_compute_uniform_SSBO = 0;
 
 
 static GLuint fontTex;
@@ -152,7 +154,7 @@ bool g_reload_shader_pressed = false;
 bool  g_pause = false;
 
 //Test Variables
-float g_angle_of_rotation = 0.1f;
+float g_angle_of_rotation = 0.0f;
 
 glm::ivec2 g_number_of_markers(1);
 glm::vec2 g_distance_to_corner = glm::vec2(0.01f);
@@ -164,6 +166,21 @@ float g_processing_status = 0.0;
 
 Plane g_plane;
 Plane g_plane_out;
+
+bool g_show_visual = true;
+
+//imgui Info Sturct
+struct info_panel {
+	glm::uvec2 image_dimension_in;
+	glm::uvec2 image_dimension_out;
+	glm::uvec2 workgroup_size;
+	glm::uvec2 workgroups;
+	glm::vec2 workgroups_float;
+	glm::uvec2 global_thread_count;
+	float proccessing_status;
+
+	GLint64 max_work_groups;
+} infos;
 
 struct Manipulator
 {
@@ -254,7 +271,6 @@ bool read_bitmap(std::string& volume_string){
 #else
 	int mode = 2;
 
-	//g_image_dimensions = glm::uvec2(4000u, 4000u);
 	g_image_data = g_image_loader.generate_artificial_test_byte_map(mode, g_image_dimensions);
 	g_image_byte_data_size = g_image_loader.get_byte_size(g_image_dimensions);
 
@@ -274,16 +290,16 @@ bool read_bitmap(std::string& volume_string){
 	float max_image_dim = glm::max((float)g_image_dimensions.x, (float)g_image_dimensions.y);
 	float max_image_out_dim = glm::max((float)g_image_out_dimensions.x, (float)g_image_out_dimensions.y);
 	g_plane = Plane(glm::vec2(0.0f), glm::vec2((float)g_image_dimensions.x / max_image_dim, (float)g_image_dimensions.y / max_image_dim));
-	g_plane_out = Plane(glm::vec2(0.0f), glm::vec2((float)g_image_out_dimensions.x/ max_image_out_dim * 2, (float)g_image_out_dimensions.y / max_image_out_dim * 2));
+	g_plane_out = Plane(glm::vec2(0.0f), glm::vec2((float)g_image_out_dimensions.x/ max_image_out_dim * 2, (float)g_image_out_dimensions.y * 4 / max_image_out_dim));
 
 	glGenBuffers(1, &g_bitmap_SSBO);
 	glBindBuffer(GL_SHADER_STORAGE_BUFFER, g_bitmap_SSBO);
-	glBufferData(GL_SHADER_STORAGE_BUFFER, g_image_byte_data_size, &g_image_data[0], GL_DYNAMIC_COPY);
+	glBufferData(GL_SHADER_STORAGE_BUFFER, g_image_byte_data_size, &g_image_data[0], GL_DYNAMIC_READ);
 	glBindBuffer(GL_SHADER_STORAGE_BUFFER, 0);
 
 	glGenBuffers(1, &g_bitmap_out_SSBO);
 	glBindBuffer(GL_SHADER_STORAGE_BUFFER, g_bitmap_out_SSBO);
-	glBufferData(GL_SHADER_STORAGE_BUFFER, g_image_out_byte_data_size, &g_image_out_data[0], GL_DYNAMIC_COPY);
+	glBufferData(GL_SHADER_STORAGE_BUFFER, g_image_out_byte_data_size, &g_image_out_data[0], GL_STATIC_READ);
 	glBindBuffer(GL_SHADER_STORAGE_BUFFER, 0);
 
     return (bool)g_bitmap_SSBO;
@@ -355,9 +371,7 @@ bool generate_marker_ssbo(glm::vec2 nbr_marker_squares, glm::vec2 distance_in_pe
 	std::vector<glm::vec4> aaba = bah.get_aaba();
 	std::vector<glm::vec4> g_marker_transform_coeff_data;
 	g_marker_transform_coeff_data.resize(nbr_marker_squares.x * nbr_marker_squares.y * 2u);
-
 	
-
 	glGenBuffers(1, &g_marker_vector_SSBO);
 	glBindBuffer(GL_SHADER_STORAGE_BUFFER, g_marker_vector_SSBO);
 	glBufferData(GL_SHADER_STORAGE_BUFFER, (size_t)MAX_SUPPORTET_MARKER * nbr_of_points_per_marker_square * sizeof(glm::vec2), &g_marker_data[0], GL_DYNAMIC_COPY);
@@ -426,7 +440,7 @@ update_marker_ssbo(glm::vec2 nbr_marker_squares, glm::vec2 distance_in_percent, 
 			g_marker_data[(y * nbr_marker_squares.x + x) * nbr_of_points_per_marker_square + 6] = rotate2D(g_marker_data[(y * nbr_marker_squares.x + x) * nbr_of_points_per_marker_square + 2], angle_of_rotation);
 			g_marker_data[(y * nbr_marker_squares.x + x) * nbr_of_points_per_marker_square + 7] = rotate2D(g_marker_data[(y * nbr_marker_squares.x + x) * nbr_of_points_per_marker_square + 3], angle_of_rotation);
 #else
-			g_marker_data[(y * nbr_marker_squares.x + x) * nbr_of_points_per_marker_square + 4] = glm::vec2(minx + 0.01f, miny);
+			g_marker_data[(y * nbr_marker_squares.x + x) * nbr_of_points_per_marker_square + 4] = glm::vec2(minx + 0.1f, miny);
 			g_marker_data[(y * nbr_marker_squares.x + x) * nbr_of_points_per_marker_square + 5] = glm::vec2(maxx, miny - 0.01f);
 			g_marker_data[(y * nbr_marker_squares.x + x) * nbr_of_points_per_marker_square + 6] = glm::vec2(maxx, maxy);
 			g_marker_data[(y * nbr_marker_squares.x + x) * nbr_of_points_per_marker_square + 7] = glm::vec2(minx, maxy);
@@ -680,11 +694,43 @@ void showGUI(){
         ms_per_frame_idx = (ms_per_frame_idx + 1) % ms_per_frame.size();
     }
     const float ms_per_frame_avg = ms_per_frame_accum / ms_per_frame.size();
+	
+	if (ImGui::CollapsingHeader("Test Infos", 0, true, true))
+	{
+		static ImVec4 text_color(0.0, 1.0, 0.0, 1.0);
+
+		ImGui::Text("Timing:");
+		if (ms_per_frame_avg > 10){
+			text_color = ImVec4(1.0, 1.0, 0.0, 1.0);
+		}
+		else if (ms_per_frame_avg > 30)
+		{
+			text_color = ImVec4(1.0, 0.0, 0.0, 1.0);
+		}
+
+		ImGui::TextColored(text_color, "Application average %.3f ms/frame (%.1f FPS)", ms_per_frame_avg, 1000.0 / ms_per_frame_avg);
+
+		ImGui::Text("Input:");
+		ImGui::Text("Input Image Dimension x: %d y: %d", infos.image_dimension_in.x, infos.image_dimension_in.y);
+		ImGui::Text("Input Image Byte Size : %d ", g_image_byte_data_size);
+		ImGui::Text("Output Image Dimension x: %d y: %d", infos.image_dimension_out.x, infos.image_dimension_out.y);
+		ImGui::Text("Output Image Byte Size : %d ",g_image_out_byte_data_size);
+		
+		ImGui::Text("Local Thread Size x: %d y: %d", infos.workgroup_size.x, infos.workgroup_size.y);
+		ImGui::Text("Working Groups x: %d y: %d", infos.workgroups.x, infos.workgroups.y);
+		ImGui::Text("Working Groups_float x: %.3f y: %.3f", infos.workgroups_float.x, infos.workgroups_float.y);
+		ImGui::Text("Global Thread Size x: %d y: %d", infos.global_thread_count.x, infos.global_thread_count.y);
+		
+		ImGui::Text("Process Status: %f", infos.proccessing_status);
+		ImGui::Text("Max Threads: %d", infos.max_work_groups);
+
+	}
 
 	if (ImGui::CollapsingHeader("Test variables", 0, true, true))
 	{
-		bool load_LIS_1 = false;
-		
+
+		ImGui::Checkbox("Show Visualisierung", &g_show_visual);
+				
 		ImGui::Text("Environment");
 		ImGui::Text("d corner");
 		//ImGui::SameLine();		
@@ -707,7 +753,7 @@ void showGUI(){
 		g_data_changed ^= ImGui::SliderFloat("yp", &g_empty_in_percent.y, -10.0, 100.0, "%.3f", 1.0f);
 		
 		ImGui::Text("Transformation");
-		g_data_changed ^= ImGui::SliderFloat("Angle rotation", &g_angle_of_rotation, -glm::pi<float>() , glm::pi<float>(), "%.3f", 1.0f);
+		g_data_changed ^= ImGui::SliderFloat("Angle rotation", &g_angle_of_rotation, -0.5f , 0.5f, "%.3f", 1.0f);
 
 		ImGui::Text("Virtual Processing Status");
 		ImGui::SliderFloat(" percent done", &g_processing_status, 0.0f, 100.0f, "%.3f", 1.0f);
@@ -757,7 +803,7 @@ void showGUI(){
 
     }
 
-    if (ImGui::CollapsingHeader("Timing"))
+    if (ImGui::CollapsingHeader("Timing"), true, true)
     {
         ImGui::Text("Application average %.3f ms/frame (%.1f FPS)", ms_per_frame_avg, 1000.0 / ms_per_frame_avg);
 
@@ -806,11 +852,26 @@ int main(int argc, char* argv[])
 
 
     ///NOTHING TODO HERE-------------------------------------------------------------------------------
+	//void glGetInteger64i_v(GLenum pname​, GLuint index​, GLint64 * data​);
 
     // init and upload volume texture
     bool check = read_bitmap(g_file_string);
 	check = generate_marker_ssbo(g_number_of_markers, g_empty_in_percent, g_distance_to_corner);
    
+	struct compute_uniform_struct {
+		glm::uvec2 image_dimensions = g_image_dimensions;
+		glm::uvec2 image_out_dimensions = g_image_out_dimensions;
+		unsigned image_byte_length = g_image_byte_data_size;
+		unsigned image_out_byte_length = g_image_out_byte_data_size;
+		glm::uvec2 nbr_of_marker = g_number_of_markers;
+		float	   process_status = g_processing_status / 100.0f;
+	} ssbouniform;
+
+	glGenBuffers(1, &g_compute_uniform_SSBO);
+	glBindBuffer(GL_SHADER_STORAGE_BUFFER, g_compute_uniform_SSBO);
+	glBufferData(GL_SHADER_STORAGE_BUFFER, sizeof(compute_uniform_struct), &ssbouniform,GL_DYNAMIC_COPY);
+	glBindBuffer(GL_SHADER_STORAGE_BUFFER, 0);
+
     // loading actual raytracing shader code (volume.vert, volume.frag)
     // edit volume.frag to define the result of our volume raycaster  
     try {
@@ -826,6 +887,7 @@ int main(int argc, char* argv[])
         g_error_message = ss.str();
         g_reload_shader_error = true;
     }
+
 
     // init object manipulator (turntable)
     Manipulator manipulator;
@@ -854,6 +916,7 @@ int main(int argc, char* argv[])
                 //std::cout << "Reload shaders" << std::endl;
 				newProgram = loadShaders(g_file_vertex_shader, g_file_fragment_shader);
 				newResultProgram = loadShaders(g_file_vertex_result_shader, g_file_fragment_result_shader);
+				newViewProgram = loadShaders(g_file_vertex_view_shader, g_file_fragment_view_shader);
 				newComputeProgram = loadComputeShaders(g_file_compute_result_shader);
                 g_error_message = "";
             }
@@ -916,7 +979,7 @@ int main(int argc, char* argv[])
 
         float fovy = 45.0f;
         float aspect = (float)size.x / (float)size.y;
-        float zNear = 0.025f, zFar = 10.0f;
+        float zNear = 0.0025f, zFar = 5.0f;
         glm::mat4 projection = glm::perspective(fovy, aspect, zNear, zFar);
 
         glm::vec3 translate_rot = glm::vec3(-0.5f, -0.5f, -0.5f);
@@ -933,7 +996,10 @@ int main(int argc, char* argv[])
         if (!g_over_gui){
             turntable_matrix = manipulator.matrix(g_win);
         }
-				
+			
+
+		ssbouniform.process_status = g_processing_status / 100.0;
+		ssbouniform.nbr_of_marker = g_number_of_markers;
 		//glBindBuffer(GL_SHADER_STORAGE_BUFFER, g_bitmap_SSBO);
 		////download
 		//GLvoid* p = glMapBuffer(GL_SHADER_STORAGE_BUFFER, GL_READ_ONLY);
@@ -942,18 +1008,21 @@ int main(int argc, char* argv[])
 
 		//glFinish();
 
-		////upload
-		//p = glMapBuffer(GL_SHADER_STORAGE_BUFFER, GL_WRITE_ONLY);
-		//memcpy(p, &g_image_data[current_upload_buffer][0], sizeof(g_image_byte_data_size));
-		//glUnmapBuffer(GL_SHADER_STORAGE_BUFFER);
+		////download
+
+		//upload
+		glBindBuffer(GL_SHADER_STORAGE_BUFFER, g_compute_uniform_SSBO);
+		GLvoid* p = glMapBuffer(GL_SHADER_STORAGE_BUFFER, GL_WRITE_ONLY);
+		memcpy(p, &ssbouniform, sizeof(compute_uniform_struct));
+		glUnmapBuffer(GL_SHADER_STORAGE_BUFFER);
 
 		//glFinish();
 
 		//glBindBuffer(GL_SHADER_STORAGE_BUFFER, 0);
 
-		int tmp_buffer = current_download_buffer;
-		current_download_buffer = current_upload_buffer;
-		current_upload_buffer = tmp_buffer;
+		//int tmp_buffer = current_download_buffer;
+		//current_download_buffer = current_upload_buffer;
+		//current_upload_buffer = tmp_buffer;
 
 		GLuint error = glGetError();
 		if(error)
@@ -1012,7 +1081,7 @@ int main(int argc, char* argv[])
 				glm::value_ptr(projection));
 			glUniformMatrix4fv(glGetUniformLocation(current_program, "Modelview"), 1, GL_FALSE,
 				glm::value_ptr(model_view));
-			if (!g_pause) {
+			if (!g_pause && g_show_visual) {
 				g_plane.draw();
 			}
 			glUseProgram(0);
@@ -1035,23 +1104,35 @@ int main(int argc, char* argv[])
 		block_index = glGetProgramResourceIndex(current_program, GL_SHADER_STORAGE_BLOCK, "marker_transform_buffer");
 		glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 4, g_marker_transform_SSBO);
 
+		block_index = glGetProgramResourceIndex(current_program, GL_SHADER_STORAGE_BLOCK, "uniform_ssbo_buffer");
+		glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 5, g_compute_uniform_SSBO);
+
 		glUniform1ui(glGetUniformLocation(current_program, "image_byte_length"), (GLuint)g_image_byte_data_size);
 		glUniform1ui(glGetUniformLocation(current_program, "image_out_byte_length"), (GLuint)g_image_out_byte_data_size);
 		glUniform2ui(glGetUniformLocation(current_program, "image_dimensions"), g_image_dimensions.x, g_image_dimensions.y);
 		glUniform2ui(glGetUniformLocation(current_program, "image_out_dimensions"), g_image_out_dimensions.x, g_image_out_dimensions.y);
 		glUniform2ui(glGetUniformLocation(current_program, "nbr_of_marker"), g_number_of_markers.x, g_number_of_markers.y);
+		glUniform1f(glGetUniformLocation(current_program, "process_status"), g_processing_status);
 
-		glUniform1ui(glGetUniformLocation(current_program, "image_byte_length"), (GLuint)g_image_byte_data_size);
 		
-		glDispatchCompute(g_image_out_dimensions.x / 16, g_image_out_dimensions.y / 16, 1);
-
-		glMemoryBarrier(GL_TEXTURE_FETCH_BARRIER_BIT);
-
+		glm::uvec2 threads = glm::uvec2(g_image_out_dimensions.x, g_image_out_dimensions.y);
+		
+		infos.image_dimension_in = g_image_dimensions;
+		infos.image_dimension_out = g_image_out_dimensions;
+		infos.workgroup_size = glm::uvec2(32u, 16u);
+		infos.workgroups = threads / infos.workgroup_size;
+		infos.workgroups_float = glm::vec2(threads) / glm::vec2(infos.workgroup_size);
+		infos.global_thread_count = infos.workgroups * infos.workgroup_size;
+		infos.proccessing_status = g_processing_status;
+		
+		glDispatchCompute(infos.workgroups.x, infos.workgroups.y, 1);
+		//glDispatchCompute(2, 8, 1);
+				
 		glUseProgram(0);
 		
 		glm::detail::tmat4x4<float, glm::highp> model_view;
 		model_view = view
-			* glm::translate(glm::vec3(1.125f, 0.1f, 0.0f))
+			* glm::translate(glm::vec3(1.125f, 0.2f, 0.0f))
 			* turntable_matrix
 			* glm::rotate(float(M_PI), glm::vec3(0.0f, 1.0f, 0.0f))
 			* glm::rotate(float(M_PI), glm::vec3(1.0f, 0.0f, 0.0f))
@@ -1095,10 +1176,24 @@ int main(int argc, char* argv[])
 		
 		glUseProgram(0);
 		
+		error = glGetError();
+		if (error)
+			std::cout << "Post Render error code: " << error << std::endl;
 
 		error = glGetError();
 		if (error)
-			std::cout << "Post Render error code: " << glGetError() << std::endl;
+			std::cout << "Pre Clear Render error code: " << error << std::endl;
+
+		GLint zero = 0;
+		glBindBuffer(GL_SHADER_STORAGE_BUFFER, g_bitmap_out_SSBO);
+		//glBufferData(GL_SHADER_STORAGE_BUFFER, g_image_out_byte_data_size, &g_image_out_data[0], GL_DYNAMIC_COPY);
+		glClearBufferData(GL_SHADER_STORAGE_BUFFER, GL_R8, GL_RED, GL_UNSIGNED_SHORT, &zero);
+		glBindBuffer(GL_SHADER_STORAGE_BUFFER, 0);
+
+
+		error = glGetError();
+		if (error)
+			std::cout << "Post Clear error code: " << error << std::endl;
 
 
         //IMGUI ROUTINE begin    

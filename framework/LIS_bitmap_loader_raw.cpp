@@ -72,11 +72,11 @@ LIS_bitmap_loader_raw::generate_artificial_test_byte_map(unsigned nbr, glm::uvec
 		break;
 	}
 	case 2: { // fast byte 1 byte 0
-		for (auto y = 0; y != dimensions.y; y += 8) {
+		for (auto y = 0; y != dimensions.y; ++y) {
 			for (auto x = 0; x != dimensions.x; x += 8) {
 				size_t byte_offset = (x + dimensions.x * y) / 8;
 
-				if (byte_offset % 2 == 0)
+				if ((x)% 16 == 0)
 					test_data[byte_offset] = 0xFFFFu;
 			}
 		}
